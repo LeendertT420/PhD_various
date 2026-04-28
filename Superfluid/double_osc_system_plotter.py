@@ -20,8 +20,8 @@ alpha_min, alpha_max = 0, 5
 # -----------------------------
 alpha0, delta0 = 0.0, 0.0
 tau0 = 1.0
-w10, w20 = 1.0, 1.0
-g10, g20 = 0.05, 0.05
+rho0 = 1.0
+gamma10, gamma20 = 0.05, 0.05
 
 # ICs
 x10, v10 = 0.0, 0.0
@@ -126,16 +126,15 @@ sA = make_slider(0.57, 0.23, 'α', 0, 5, alpha0)
 sD = make_slider(0.75, 0.23, 'δ', delta_min, delta_max, delta0)
 sT = make_slider(0.57, 0.19, 'τ', 0.1, 5, tau0)
 
-sW1 = make_slider(0.75, 0.19, 'ω1', 0.1, 3, w10)
-sW2 = make_slider(0.57, 0.15, 'ω2', 0.1, 3, w20)
+srho = make_slider(0.75, 0.19, r'$\rho$', 0.1, 3, rho0)
 
-sG1 = make_slider(0.75, 0.15, 'γ1', 0, 2, g10)
-sG2 = make_slider(0.57, 0.11, 'γ2', 0, 2, g20)
+sG1 = make_slider(0.75, 0.15, 'γ1', 0, 2, gamma10)
+sG2 = make_slider(0.57, 0.11, 'γ2', 0, 2, gamma20)
 
 sX10 = make_slider(0.75, 0.11, 'x1₀', -5, 5, x10)
 sX20 = make_slider(0.57, 0.07, 'x2₀', -5, 5, x20)
 
-sTime = make_slider(0.75, 0.07, 'T', 1, 100, T0)
+sTime = make_slider(0.75, 0.07, 'T', 1, 500, T0)
 
 # =============================
 # UPDATE
@@ -144,24 +143,24 @@ def update(val):
 
     alpha, delta = sA.val, sD.val
     tau = sT.val
-    w1, w2 = sW1.val, sW2.val
+    rho = srho.val
     g1, g2 = sG1.val, sG2.val
 
     T = sTime.val
 
     # bifurcation
-    bif_lower.set_data(deltas, lower_boundary(deltas, w1, w2)*rho(w1, w2))
-    bif_upper.set_data(deltas, upper_boundary(deltas, w1, w2)*rho(w1, w2))
+    bif_lower.set_data(deltas, lower_boundary(deltas, rho)*sigma(rho))
+    bif_upper.set_data(deltas, upper_boundary(deltas, rho)*sigma(rho))
 
-    thresholds = lasing_threshold(deltas, tau, w1, w2, g1, g2)
+    thresholds = lasing_threshold(deltas, tau, rho, g1, g2)
     print(np.shape(thresholds))
     for threshold, lasing_line in zip(thresholds, lasing_lines):
-        lasing_line.set_data(deltas, threshold*rho(w1, w2))
+        lasing_line.set_data(deltas, threshold*sigma(rho))
 
-    point.set_data([delta], [alpha*rho(w1, w2)])
+    point.set_data([delta], [alpha*sigma(rho)])
 
     # eigenvalues
-    eigs_all = compute_eigs(alpha, delta, tau, w1, w2, g1, g2)
+    eigs_all = compute_eigs(alpha, delta, tau, rho, g1, g2)
 
     for i in range(4):
         if i < len(eigs_all):
@@ -173,10 +172,10 @@ def update(val):
     # solve system
     y0 = [sX10.val, 0, sX20.val, 0, z0]
 
-    t_eval = np.linspace(0, T, 1500)
+    t_eval = np.linspace(0, T, 5000)
 
     sol = solve_ivp(
-        lambda t,y: system(t, y, alpha, delta, tau, w1, w2, g1, g2),
+        lambda t,y: system(t, y, alpha, delta, tau, rho, g1, g2),
         (0, T), y0, t_eval=t_eval
     )
 
@@ -226,7 +225,7 @@ def update(val):
     fig.canvas.draw_idle()
 
 # connect sliders
-for s in [sA,sD,sT,sW1,sW2,sG1,sG2,sX10,sX20,sTime]:
+for s in [sA,sD,sT,srho,sG1,sG2,sX10,sX20,sTime]:
     s.on_changed(update)
 
 update(None)
