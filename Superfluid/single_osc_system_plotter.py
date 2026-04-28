@@ -4,7 +4,7 @@ from matplotlib.widgets import Slider
 from matplotlib.patches import Rectangle
 from scipy.integrate import solve_ivp
 from matplotlib.gridspec import GridSpec
-from lagged_lasing import *
+from single_osc_eqs import *
 
 # -----------------------------
 # delta grid
