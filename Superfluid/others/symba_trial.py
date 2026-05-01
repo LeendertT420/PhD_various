@@ -1,7 +1,8 @@
+import sympy as sp
 from sympy import symbols, Matrix, Poly, resultant, simplify, factor, collect
 
 # 1. Define variables
-rho, gamma1, gamma2, L, tau = symbols('rho gamma1 gamma2 L tau', real=True, positive=True)
+rho, gamma1, gamma2, L, tau = symbols('rho gamma1 gamma2 L tau', real=True)
 lam, x = symbols('lam x') # lam is for char poly, x represents omega**2
 
 # 2. Define the Matrix
@@ -32,21 +33,9 @@ res = resultant(eq1, eq2, x)
 print(res)
 # 7. Collect coefficients by powers of L
 # The resultant is a polynomial in L, e.g., C3*L^3 + C2*L^2 + C1*L + C0 = 0
-xi, mu, sigma, chi = symbols('xi mu sigma chi')
 
-# This is cleaner and safer than sequential lines
-subs_list = [
-    (xi, (gamma1 + gamma2)/tau),
-    (mu, (gamma1/rho + gamma2*rho)/tau),
-    (sigma, 1/rho + rho),
-    (chi, (gamma1*gamma2+sigma)/tau)
-]
-
-# Apply all at once
-res_readable = res.subs({val: var for var, val in subs_list})
-print(res_readable)
 # 2. Extract and format coefficients
-res_poly = Poly(res_readable, L)
+res_poly = Poly(res, L)
 coeffs_L = res_poly.all_coeffs()
 
 print("--- Readable Coefficients ---")

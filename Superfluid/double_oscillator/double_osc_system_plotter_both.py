@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.widgets import Slider
+from matplotlib.widgets import Slider, TextBox
 from matplotlib.patches import Rectangle
 from scipy.integrate import solve_ivp
 from matplotlib.gridspec import GridSpec
@@ -42,9 +42,9 @@ ax1 = fig.add_subplot(gs[0, 0])  # bifurcation
 ax2 = fig.add_subplot(gs[1, 0])  # eigenvalues
 
 # CENTER COLUMN
-ax3 = fig.add_subplot(gs[0, 1], projection='3d')  # (x1,v1,z)
-ax4 = fig.add_subplot(gs[1, 1], projection='3d')  # (x2,v2,z)
-ax5 = fig.add_subplot(gs[2, 1])                  # (x1,x2)
+ax3 = fig.add_subplot(gs[0, 1])  # (x1,v1)
+ax4 = fig.add_subplot(gs[1, 1])  # (x2,v2)
+ax5 = fig.add_subplot(gs[2, 0])                  # (x1,x2)
 
 # RIGHT COLUMN (time series)
 ax6 = fig.add_subplot(gs[0, 2])
@@ -73,68 +73,95 @@ ax1.set_title("Bifurcation diagram")
 # =============================
 # EIGENVALUES
 # =============================
-scatters = [ax2.scatter([], [], color=c) for c in colors]
+scatters = [ax2.scatter([], [], color=c, s=10) for c in colors]
 
 ax2.axhline(0, color='gray')
 ax2.axvline(0, color='gray')
-ax2.set_xlim(-3, 3)
-ax2.set_ylim(-3, 3)
+ax2.set_xlim(-1, 1)
+ax2.set_ylim(-1.5, 1.5)
 ax2.set_title("Eigenvalues")
-
-# =============================
-# PHASE SPACE
-# =============================
-traj1, = ax3.plot([], [], [], 'k')
-traj2, = ax4.plot([], [], [], 'k')
-
-traj12, = ax5.plot([], [], 'k')
-
-ax3.set_title("(x1, v1, z)")
-ax4.set_title("(x2, v2, z)")
-ax5.set_title("(x1, x2)")
 
 # =============================
 # TIME SERIES
 # =============================
-line_x1, = ax6.plot([], [], label='x1')
-line_v1, = ax6.plot([], [], label='v1')
-line_z1, = ax6.plot([], [], label='z')
+line_x1, = ax3.plot([], [], label=r'$x_1$')
+line_v1, = ax3.plot([], [], label=r'$v_1$')
+line_z, = ax3.plot([], [], label=r'$z$')
 
-ax6.set_title("Oscillator 1")
+ax3.set_title("Oscillator 1")
 
-line_x2, = ax7.plot([], [], label='x2')
-line_v2, = ax7.plot([], [], label='v2')
+line_x2, = ax4.plot([], [], label=r'$x_2$')
+line_v2, = ax4.plot([], [], label=r'$v_2$')
 
-ax7.set_title("Oscillator 2")
+ax4.set_title("Oscillator 2")
 
-for ax in [ax6, ax7]:
+
+ax5.set_title("(x1, x2)")
+
+line_xplus, = ax6.plot([], [], label=r'$x_+$')
+line_vplus, = ax6.plot([], [], label=r'$v_+$')
+
+ax6.set_title(r"osc.1 + osc. 2")
+
+line_xminus, = ax7.plot([], [], label=r'$x_-$')
+line_vminus, = ax7.plot([], [], label=r'$v_-$')
+
+ax7.set_title(r"osc.1 - osc. 2")
+
+for ax in [ax3, ax4, ax6, ax7]:
     ax.legend()
 
 # =============================
 # SLIDERS
 # =============================
-box = Rectangle((0.55, 0.02), 0.4, 0.25,
+box = Rectangle((0.45, 0.05), 0.5, 0.25,
                 transform=fig.transFigure,
                 fill=False, linewidth=2)
 fig.patches.append(box)
 
-def make_slider(x, y, label, vmin, vmax, vinit):
+def make_slider(x, y, label, vmin, vmax, vinit, step=None):
     ax = fig.add_axes([x, y, 0.15, 0.02])
-    return Slider(ax, label, vmin, vmax, valinit=vinit)
+    return Slider(ax, label, vmin, vmax, valinit=vinit, valstep=step)
 
-sA = make_slider(0.57, 0.23, 'α', 0, 5, alpha0)
-sD = make_slider(0.75, 0.23, 'δ', delta_min, delta_max, delta0)
-sT = make_slider(0.57, 0.19, 'τ', 0.1, 5, tau0)
+def make_slider_with_box(x, y, label, vmin, vmax, vinit, step=None):
+    # Slider
+    ax_slider = fig.add_axes([x, y, 0.15, 0.02])
+    slider = Slider(ax_slider, label, vmin, vmax, valinit=vinit, valstep=step)
 
-srho = make_slider(0.75, 0.19, r'$\rho$', 0.1, 3, rho0)
+    # Text box (to the right)
+    ax_box = fig.add_axes([x + 0.17, y, 0.05, 0.03])
+    text_box = TextBox(ax_box, '', initial=str(vinit))
 
-sG1 = make_slider(0.75, 0.15, 'γ1', 0, 2, gamma10)
-sG2 = make_slider(0.57, 0.11, 'γ2', 0, 2, gamma20)
+    # When slider moves → update text
+    def update_text(val):
+        text_box.set_val(f"{val:.3f}")
+    slider.on_changed(update_text)
 
-sX10 = make_slider(0.75, 0.11, 'x1₀', -5, 5, x10)
-sX20 = make_slider(0.57, 0.07, 'x2₀', -5, 5, x20)
+    # When user types → update slider
+    def submit(text):
+        try:
+            val = float(text)
+            if vmin <= val <= vmax:
+                slider.set_val(val)
+        except ValueError:
+            pass
+    text_box.on_submit(submit)
 
-sTime = make_slider(0.75, 0.07, 'T', 1, 500, T0)
+    return slider, text_box
+
+sA = make_slider(0.5, 0.23, r'$\alpha$', 0, 5, alpha0, step=.01)
+sD = make_slider(0.75, 0.23, r'$\delta$', delta_min, delta_max, delta0, step=.01)
+sT = make_slider(0.5, 0.19, r'$\tau$', 0.1, 5, tau0)
+
+srho = make_slider(0.75, 0.19, r'$\rho$', 0.1, 3, rho0, step=.1)
+
+sG1 = make_slider(0.75, 0.15, r'$\gamma_1$', 0, 2, gamma10, step=.01)
+sG2 = make_slider(0.5, 0.15, r'$\gamma_2$', 0, 2, gamma20, step=.01)
+
+sX10 = make_slider(0.75, 0.11, r'$x_{1,0}$', -5, 5, x10, step=.1)
+sX20 = make_slider(0.5, 0.11, r'$x_{2,0}$', -5, 5, x20, step=.1)
+
+sTime = make_slider(0.75, 0.07, r'$T$', 1, 250, T0, step=1)
 
 # =============================
 # UPDATE
@@ -160,11 +187,11 @@ def update(val):
     point.set_data([delta], [alpha*sigma(rho)])
 
     # eigenvalues
-    eigs_all = compute_eigs(alpha, delta, tau, rho, g1, g2)
+    roots, eigsvals, eigvecs = compute_eigs(alpha, delta, tau, rho, g1, g2)
 
     for i in range(4):
-        if i < len(eigs_all):
-            eigs = eigs_all[i]
+        if i < len(eigsvals):
+            eigs = eigsvals[i]
             scatters[i].set_offsets(np.c_[eigs.real, eigs.imag])
         else:
             scatters[i].set_offsets(np.empty((0,2)))
@@ -172,7 +199,7 @@ def update(val):
     # solve system
     y0 = [sX10.val, 0, sX20.val, 0, z0]
 
-    t_eval = np.linspace(0, T, 5000)
+    t_eval = np.linspace(0, T, 20*T)
 
     sol = solve_ivp(
         lambda t,y: system(t, y, alpha, delta, tau, rho, g1, g2),
@@ -181,46 +208,41 @@ def update(val):
 
     x1, v1, x2, v2, z = sol.y
 
-    # trajectories
-    traj1.set_data(x1, v1)
-    traj1.set_3d_properties(z)
-
-    traj2.set_data(x2, v2)
-    traj2.set_3d_properties(z)
-
-    traj12.set_data(x1, x2)
-
-    # autoscale
-    for ax, data in zip([ax3, ax4],
-                       [(x1,v1,z), (x2,v2,z)]):
-
-        mins = [d.min() for d in data]
-        maxs = [d.max() for d in data]
-        m = [0.1*(maxs[i]-mins[i]+1e-6) for i in range(3)]
-
-        ax.set_xlim(mins[0]-m[0], maxs[0]+m[0])
-        ax.set_ylim(mins[1]-m[1], maxs[1]+m[1])
-        ax.set_zlim(mins[2]-m[2], maxs[2]+m[2])
-
-    ax5.set_xlim(x1.min(), x1.max())
-    ax5.set_ylim(x2.min(), x2.max())
-
-    # time series
     line_x1.set_data(t_eval, x1)
     line_v1.set_data(t_eval, v1)
-    line_z1.set_data(t_eval, z)
+    line_z.set_data(t_eval, z)
 
     line_x2.set_data(t_eval, x2)
     line_v2.set_data(t_eval, v2)
 
-    for ax in [ax6, ax7]:
+    ax5.set_xlim((x2).min(), (x2).max())
+    ax5.set_ylim((x1).min(), (x1).max())
+
+    # time series
+    line_xplus.set_data(t_eval, x1+x2)
+    line_vplus.set_data(t_eval, v1+v2)
+    line_z.set_data(t_eval, z)
+
+    line_xminus.set_data(t_eval, x1-x2)
+    line_vminus.set_data(t_eval, v1-v2)
+
+    for ax in [ax3, ax4, ax6, ax7]:
         ax.set_xlim(0, T)
 
-    ax6.set_ylim(min(x1.min(), v1.min(), z.min()),
-                 max(x1.max(), v1.max(), z.max()))
+    limits_constant = True
+    if limits_constant:
+        for ax in [ax3, ax4, ax6, ax7]:
+            ax.set_ylim(-5, 5)
 
-    ax7.set_ylim(min(x2.min(), v2.min()),
-                 max(x2.max(), v2.max()))
+    else:
+        ax6.set_ylim(min((x1+x2).min(), (v1+v2).min(), z.min()),
+                    max((x1+x2).max(), (v1+v2).max(), z.max()))
+
+        ax7.set_ylim(min((x1-x2).min(), (v1-v2).min()),
+                    max((x1-x2).max(), (v1-v2).max()))
+
+    for ax in [ax3, ax4, ax6, ax7]:
+        ax.grid(True)    
 
     fig.canvas.draw_idle()
 

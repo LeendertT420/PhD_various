@@ -32,29 +32,35 @@ def x_star(alpha, delta):
     roots = np.real(roots[np.isreal(roots)])
     return roots
 
-def L_prime(x, alpha, delta):
-    return -2*alpha*(x + delta) / ((x + delta)**2 + 1)**2
+def L_prime(x_star, alpha, delta):
+    return -2*alpha*(x_star + delta) / ((x_star + delta)**2 + 1)**2
+
 
 # -----------------------------
 # Jacobian
 # -----------------------------
-def Jacobian(alpha, delta, zeta, tau):
-    roots = x_star(alpha, delta)
-
-    J_list = []
-    for x in roots:
-        dLdt = L_prime(x, alpha, delta)
-        J = np.array([
-            [0,    1,        0],
-            [-1,  -2*zeta,   1],
-            [dLdt/tau, 0,   -1/tau]
+def Jacobian(x, alpha, delta, zeta, tau):
+    dLdt = L_prime(x, alpha, delta)
+    J = np.array([
+        [0,    1,        0],
+        [-1,  -2*zeta,   1],
+        [dLdt/tau, 0,   -1/tau]
         ])
-        J_list.append(J)
-
-    return J_list
+    return J
 
 def compute_eigs(alpha, delta, zeta, tau):
-    return [np.linalg.eigvals(J) for J in Jacobian(alpha, delta, zeta, tau)]
+    roots = x_star(alpha, delta)
+    eigvals = []
+    eigvecs = [[],[],[]]
+
+    for i, root in enumerate(roots):
+        l = np.linalg.eigvals(Jacobian(root, alpha, delta, zeta, tau))
+        eigvals.append(l)
+        for val in l:
+            v = [1, val, L_prime(root, alpha, delta)/(val*tau+1)]
+            eigvecs[i].append(v)
+
+    return roots, eigvals, eigvecs
 
 
 # -----------------------------
@@ -66,3 +72,26 @@ def system(t, y, alpha, delta, zeta, tau):
     dvdt = -2 * zeta * v - x + z
     dzdt = alpha / ((x+delta)**2+1)/tau - z/tau
     return [dxdt, dvdt, dzdt]
+
+
+
+
+
+def project_onto_plane(x, v1, v2):
+    """
+    Project vector x onto the plane spanned by v1 and v2.
+
+    Parameters:
+        x, v1, v2 : array-like (shape: (n,))
+    
+    Returns:
+        projection of x onto span{v1, v2}
+    """
+    # Stack vectors as columns of A (n x 2 matrix)
+    A = np.column_stack((v1, v2))
+    
+    # Compute projection: A (A^T A)^{-1} A^T x
+    ATA_inv = np.linalg.inv(A.T @ A)
+    projection = A @ ATA_inv @ A.T @ x
+    
+    return projection

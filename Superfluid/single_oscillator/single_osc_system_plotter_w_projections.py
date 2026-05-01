@@ -36,7 +36,8 @@ ax2 = fig.add_subplot(gs[1, 0])
 ax4 = fig.add_subplot(gs[2, 0])
 
 # RIGHT
-ax3 = fig.add_subplot(gs[0:2, 1], projection='3d')
+ax3 = fig.add_subplot(gs[0, 1], projection='3d')
+ax5 = fig.add_subplot(gs[1, 1])
 
 # =============================
 # BIFURCATION
@@ -83,6 +84,8 @@ ax3.set_xlabel("x")
 ax3.set_ylabel("v")
 ax3.set_zlabel("z")
 ax3.set_title("Phase space")
+
+proj, = ax5.plot([], [], 'k')
 
 # =============================
 # TIME SERIES
@@ -135,12 +138,66 @@ def update(val):
     lasing_line.set_data(deltas, lasing_threshold(deltas, zeta, tau))
     point.set_data([delta], [alpha])
 
-    eigs_all = compute_eigs(alpha, delta, zeta, tau)
+    roots, eigvals, eigvecs = compute_eigs(alpha, delta, zeta, tau)
+    print(roots)
+    print(eigvals)
+    print(eigvecs)
     roots = x_star(alpha, delta)
 
+    if not hasattr(update, "eig_quivers"):
+        update.eig_quivers = []
+    else:
+        for q in update.eig_quivers:
+            q.remove()
+        update.eig_quivers = []
+
+    scale = 0.15
+
+    for i, root in enumerate(roots):
+        vals = eigvals[i]
+        vecs = eigvecs[i]
+        for j, (l, v) in enumerate(zip(vals, vecs)):
+            if np.isreal(l):
+                v = np.real(v)
+                print(v)
+                vnorm = scale * v / np.linalg.norm(v)
+
+                q = ax3.quiver(
+                    root, 0, root,
+                    vnorm[0], vnorm[1], vnorm[2],
+                    color=colors[i % len(colors)],
+                    linewidth=2
+                )
+                update.eig_quivers.append(q)
+
+            else:
+                vreal = np.real(v)
+                vimag = np.imag(v)
+
+                vrnorm = scale * vreal# / np.linalg.norm(vreal)
+                vinorm = scale * vimag# / np.linalg.norm(vimag)
+
+                r = ax3.quiver(
+                    root, 0, root,
+                    vrnorm[0], vrnorm[1], vrnorm[2],
+                    color=colors[i % len(colors)],
+                    linewidth=2
+                )
+                update.eig_quivers.append(r)
+
+                s = ax3.quiver(
+                    root, 0, root,
+                    vinorm[0], vinorm[1], vinorm[2],
+                    color=colors[i % len(colors)],
+                    linewidth=2
+                )
+                update.eig_quivers.append(s)
+
+
+
     for i in range(3):
-        if i < len(eigs_all):
-            eigs = eigs_all[i]
+        if i < len(eigvals):
+            eigs = eigvals[i]
             scatters[i].set_offsets(np.c_[eigs.real, eigs.imag])
             scatters[i].set_label(f"x*={roots[i]:.2f}")
         else:
@@ -180,6 +237,12 @@ def update(val):
 
     ax4.set_xlim(0, T)
     ax4.set_ylim(sol.y.min(), sol.y.max())
+
+    projection = project_onto_plane(sol.y, vrnorm, vinorm)
+
+    proj.set_data(projection[0], projection[1])
+    ax5.set_xlim(np.min(projection[0]), np.max(projection[0]))
+    ax5.set_ylim(np.min(projection[1]), np.max(projection[1]))
 
     fig.canvas.draw_idle()
 
