@@ -2,15 +2,15 @@ import sympy as sp
 from sympy import symbols, Matrix, Poly, resultant, simplify, factor, collect
 
 # 1. Define variables
-r, g1, g2, L, t = symbols('r g1 g2 L t', real=True)
+m, g, L, t = symbols('m g L t', real=True)
 lam, x = symbols('lam x') # lam is for char poly, x represents omega**2
 
 # 2. Define the Matrix
 J = Matrix([
     [0, 1, 0, 0, 0],
-    [-r, -g1, 0, 0, 1],
+    [-1, -g, 0, 0, 1],
     [0, 0, 0, 1, 0],
-    [0, 0, -1/r, -g2, 1],
+    [0, 0, -m, -g, m],
     [L/t, 0, L/t, 0, -1/t]
 ])
 
@@ -46,6 +46,11 @@ for i, coeff in enumerate(coeffs_L):
     power = len(coeffs_L) - 1 - i
     # Apply factor() and then collect() to make it look clean
     clean_coeff = factor(coeff)
-    print(f"C{power} (L^{power}):")
+    print(f"b{power} (L^{power}):")
     print(clean_coeff)
     print("-" * 30)
+
+P = sp.together(res_poly.as_expr())
+R = sp.discriminant(P, L)
+sol_m = sp.solve(R, m)
+print(sol_m)

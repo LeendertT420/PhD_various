@@ -27,26 +27,28 @@ def upper_boundary(d, rho):
 # lasing threshold
 # -----------------------------
 
-def lasing_threshold(delta, tau, rho, gamma1, gamma2, epsilon=1e-9):
-    b1 = -4*(gamma1 + gamma2)/tau**3
-    b2 = (gamma1**4*rho**2*tau**2 + 2*gamma1**3*gamma2*rho**2*tau**2 + 2*gamma1**2*gamma2**2*rho**2*tau**2 + 2*gamma1**2*gamma2*rho**2*tau - 4*gamma1**2*rho**3*tau**2 - gamma1**2*rho**2 + 2*gamma1*gamma2**3*rho**2*tau**2 + 2*gamma1*gamma2**2*rho**2*tau - 6*gamma1*gamma2*rho**3*tau**2 - 2*gamma1*gamma2*rho**2 - 6*gamma1*gamma2*rho*tau**2 - 2*gamma1*rho**3*tau + 2*gamma1*rho*tau + gamma2**4*rho**2*tau**2 - gamma2**2*rho**2 - 4*gamma2**2*rho*tau**2 + 2*gamma2*rho**3*tau - 2*gamma2*rho*tau - rho**4*tau**2 + 2*rho**2*tau**2 - tau**2)/(rho**2*tau**4)
-    b3 = (gamma1**4*gamma2**2*rho**3*tau**2 + gamma1**4*gamma2*rho**3*tau + gamma1**4*gamma2*rho**2*tau**3 - gamma1**4*rho**2*tau**2 + 2*gamma1**3*gamma2**3*rho**3*tau**2 + 3*gamma1**3*gamma2**2*rho**3*tau + gamma1**3*gamma2**2*rho**2*tau**3 - gamma1**3*gamma2*rho**4*tau**2 + gamma1**3*gamma2*rho**3 - 2*gamma1**3*gamma2*rho**2*tau**2 - gamma1**3*rho**3*tau**3 - gamma1**3*rho**2*tau + gamma1**2*gamma2**4*rho**3*tau**2 + gamma1**2*gamma2**3*rho**4*tau**3 + 3*gamma1**2*gamma2**3*rho**3*tau - 2*gamma1**2*gamma2**2*rho**4*tau**2 + 2*gamma1**2*gamma2**2*rho**3 - 2*gamma1**2*gamma2**2*rho**2*tau**2 - gamma1**2*gamma2*rho**5*tau**3 - 2*gamma1**2*gamma2*rho**4*tau - 6*gamma1**2*gamma2*rho**3*tau**3 - 5*gamma1**2*gamma2*rho**2*tau - gamma1**2*rho**5*tau**2 + 2*gamma1**2*rho**3*tau**2 - gamma1**2*rho*tau**2 + gamma1*gamma2**4*rho**4*tau**3 + gamma1*gamma2**4*rho**3*tau - 2*gamma1*gamma2**3*rho**4*tau**2 + gamma1*gamma2**3*rho**3 - gamma1*gamma2**3*rho**2*tau**2 - 5*gamma1*gamma2**2*rho**4*tau - 6*gamma1*gamma2**2*rho**3*tau**3 - 2*gamma1*gamma2**2*rho**2*tau - gamma1*gamma2**2*rho*tau**3 + 2*gamma1*gamma2*rho**5*tau**2 - 4*gamma1*gamma2*rho**3*tau**2 + 2*gamma1*gamma2*rho*tau**2 - gamma1*rho**6*tau**3 - gamma1*rho**5*tau + 2*gamma1*rho**4*tau**3 + 2*gamma1*rho**3*tau - gamma1*rho**2*tau**3 - gamma1*rho*tau - gamma2**4*rho**4*tau**2 - gamma2**3*rho**4*tau - gamma2**3*rho**3*tau**3 - gamma2**2*rho**5*tau**2 + 2*gamma2**2*rho**3*tau**2 - gamma2**2*rho*tau**2 - gamma2*rho**5*tau - gamma2*rho**4*tau**3 + 2*gamma2*rho**3*tau + 2*gamma2*rho**2*tau**3 - gamma2*rho*tau - gamma2*tau**3)/(rho**3*tau**4)
-    b4 = -gamma1*gamma2*(gamma1*tau + rho*tau**2 + 1)*(gamma2*rho*tau + rho + tau**2)*(gamma1**2*rho + gamma1*gamma2*rho**3 + gamma1*gamma2*rho + gamma2**2*rho**3 + rho**4 - 2*rho**2 + 1)/(rho**3*tau**4)
+def lasing_threshold_old(d, t, r, g1, g2, epsilon=1e-6):
+    b1 = -4*(g1 + g2)/t**3
+    b2 = (g1**4*r**2*t**2 + 2*g1**3*g2*r**2*t**2 + 2*g1**2*g2**2*r**2*t**2 + 2*g1**2*g2*r**2*t - 4*g1**2*r**3*t**2 - g1**2*r**2 + 2*g1*g2**3*r**2*t**2 + 2*g1*g2**2*r**2*t - 6*g1*g2*r**3*t**2 - 2*g1*g2*r**2 - 6*g1*g2*r*t**2 - 2*g1*r**3*t + 2*g1*r*t + g2**4*r**2*t**2 - g2**2*r**2 - 4*g2**2*r*t**2 + 2*g2*r**3*t - 2*g2*r*t - r**4*t**2 + 2*r**2*t**2 - t**2)/(r**2*t**4)
+    b3 = (g1**4*g2**2*r**3*t**2 + g1**4*g2*r**3*t + g1**4*g2*r**2*t**3 - g1**4*r**2*t**2 + 2*g1**3*g2**3*r**3*t**2 + 3*g1**3*g2**2*r**3*t + g1**3*g2**2*r**2*t**3 - g1**3*g2*r**4*t**2 + g1**3*g2*r**3 - 2*g1**3*g2*r**2*t**2 - g1**3*r**3*t**3 - g1**3*r**2*t + g1**2*g2**4*r**3*t**2 + g1**2*g2**3*r**4*t**3 + 3*g1**2*g2**3*r**3*t - 2*g1**2*g2**2*r**4*t**2 + 2*g1**2*g2**2*r**3 - 2*g1**2*g2**2*r**2*t**2 - g1**2*g2*r**5*t**3 - 2*g1**2*g2*r**4*t - 6*g1**2*g2*r**3*t**3 - 5*g1**2*g2*r**2*t - g1**2*r**5*t**2 + 2*g1**2*r**3*t**2 - g1**2*r*t**2 + g1*g2**4*r**4*t**3 + g1*g2**4*r**3*t - 2*g1*g2**3*r**4*t**2 + g1*g2**3*r**3 - g1*g2**3*r**2*t**2 - 5*g1*g2**2*r**4*t - 6*g1*g2**2*r**3*t**3 - 2*g1*g2**2*r**2*t - g1*g2**2*r*t**3 + 2*g1*g2*r**5*t**2 - 4*g1*g2*r**3*t**2 + 2*g1*g2*r*t**2 - g1*r**6*t**3 - g1*r**5*t + 2*g1*r**4*t**3 + 2*g1*r**3*t - g1*r**2*t**3 - g1*r*t - g2**4*r**4*t**2 - g2**3*r**4*t - g2**3*r**3*t**3 - g2**2*r**5*t**2 + 2*g2**2*r**3*t**2 - g2**2*r*t**2 - g2*r**5*t - g2*r**4*t**3 + 2*g2*r**3*t + 2*g2*r**2*t**3 - g2*r*t - g2*t**3)/(r**3*t**4)
+    b4 = -g1*g2*(g1*t + r*t**2 + 1)*(g2*r*t + r + t**2)*(g1**2*r + g1*g2*r**3 + g1*g2*r + g2**2*r**3 + r**4 - 2*r**2 + 1)/(r**3*t**4)
 
     dL_sols = np.roots([b1, b2, b3, b4])
-    dL_sols = np.real(dL_sols[np.isreal(dL_sols)]) # get all real solutions
+    #dL_sols = np.real(dL_sols[np.isreal(dL_sols)]) # get all real solutions
 
     a1 = 1
-    a2 = 1/tau + gamma1 + gamma2
-    a3 = (gamma1 + gamma2)/tau + sigma(rho) + gamma1*gamma2
+    a2 = (g1*t + g2*t + 1)/t
+    a3 = (g1*g2*r*t + g1*r + g2*r + r**2*t + t)/(r*t)
 
     alphas = []
-
-    for dL in dL_sols:
+    
+    s = sigma(r)
+    
+    for L in dL_sols:
         
-        a4 = (sigma(rho)+gamma1*gamma2)/tau + gamma1/rho + gamma2*rho - 2*dL/tau
-        a5 = (gamma1/rho + gamma2*rho)/tau + 1 - (gamma1+gamma2)*dL/tau
-        a6 = 1-sigma(rho)*dL/tau
+        a4 = (-2*L*r + g1*g2*r + g1*t + g2*r**2*t + r**2 + 1)/(r*t)
+        a5 = (-L*g1*r - L*g2*r + g1 + g2*r**2 + r*t)/(r*t)
+        a6 = (-L*r**2 - L + r)/(r*t)
 
         
         #test whether solution correspond to real solutions of omega 
@@ -57,18 +59,37 @@ def lasing_threshold(delta, tau, rho, gamma1, gamma2, epsilon=1e-9):
                       np.sqrt((a3 - np.sqrt(a3**2 - 4*a1*a5)) / (2*a1)),
                       np.sqrt((a4 + np.sqrt(a4**2 - 4*a2*a6)) / (2*a2)),
                       np.sqrt((a4 - np.sqrt(a4**2 - 4*a2*a6)) / (2*a2))]
-            
+            print(f'omegas{omegas}')
             for w in omegas:
+                if True:#(np.abs(a1*w**4 - a3*w**2 + a5) < epsilon
+                    #and np.abs(a2*w**4 - a4*w**2 + a6) < epsilon):
+                    print(w)
+        E = d**2 - s*L*(s*L + 2)
+        for z in [( -d*(s*L + 1) + np.sqrt(E) ) / (s*(s*L + 2)),
+                  ( -d*(s*L + 1) - np.sqrt(E) ) / (s*(s*L + 2))]:
+            alphas.append(z*( (d + s*z)**2 + 1 ))
+    print(np.shape(alphas))        
+    return alphas
 
-                if (np.abs(a1*w**4 - a3*w**2 + a5) < epsilon
-                    and np.abs(a2*w**4 - a4*w**2 + a6) < epsilon):
 
-                    E = 2*delta + sigma(rho)*dL
-                    F = E**2 - 8*sigma(rho)*(delta+1)*dL
-                    for z in [( -1*E + np.sqrt(F) ) / (4*sigma(rho)),
-                            ( -1*E - np.sqrt(F) ) / (4*sigma(rho))]:
-                        alphas.append(z*( (delta + sigma(rho)*z)**2 + 1 ))
-            
+def lasing_threshold(d, t, r, g1, g2, epsilon=1e-6):
+    b1 = -4*(g1 + g2)/t**3
+    b2 = (g1**4*r**2*t**2 + 2*g1**3*g2*r**2*t**2 + 2*g1**2*g2**2*r**2*t**2 + 2*g1**2*g2*r**2*t - 4*g1**2*r**3*t**2 - g1**2*r**2 + 2*g1*g2**3*r**2*t**2 + 2*g1*g2**2*r**2*t - 6*g1*g2*r**3*t**2 - 2*g1*g2*r**2 - 6*g1*g2*r*t**2 - 2*g1*r**3*t + 2*g1*r*t + g2**4*r**2*t**2 - g2**2*r**2 - 4*g2**2*r*t**2 + 2*g2*r**3*t - 2*g2*r*t - r**4*t**2 + 2*r**2*t**2 - t**2)/(r**2*t**4)
+    b3 = (g1**4*g2**2*r**3*t**2 + g1**4*g2*r**3*t + g1**4*g2*r**2*t**3 - g1**4*r**2*t**2 + 2*g1**3*g2**3*r**3*t**2 + 3*g1**3*g2**2*r**3*t + g1**3*g2**2*r**2*t**3 - g1**3*g2*r**4*t**2 + g1**3*g2*r**3 - 2*g1**3*g2*r**2*t**2 - g1**3*r**3*t**3 - g1**3*r**2*t + g1**2*g2**4*r**3*t**2 + g1**2*g2**3*r**4*t**3 + 3*g1**2*g2**3*r**3*t - 2*g1**2*g2**2*r**4*t**2 + 2*g1**2*g2**2*r**3 - 2*g1**2*g2**2*r**2*t**2 - g1**2*g2*r**5*t**3 - 2*g1**2*g2*r**4*t - 6*g1**2*g2*r**3*t**3 - 5*g1**2*g2*r**2*t - g1**2*r**5*t**2 + 2*g1**2*r**3*t**2 - g1**2*r*t**2 + g1*g2**4*r**4*t**3 + g1*g2**4*r**3*t - 2*g1*g2**3*r**4*t**2 + g1*g2**3*r**3 - g1*g2**3*r**2*t**2 - 5*g1*g2**2*r**4*t - 6*g1*g2**2*r**3*t**3 - 2*g1*g2**2*r**2*t - g1*g2**2*r*t**3 + 2*g1*g2*r**5*t**2 - 4*g1*g2*r**3*t**2 + 2*g1*g2*r*t**2 - g1*r**6*t**3 - g1*r**5*t + 2*g1*r**4*t**3 + 2*g1*r**3*t - g1*r**2*t**3 - g1*r*t - g2**4*r**4*t**2 - g2**3*r**4*t - g2**3*r**3*t**3 - g2**2*r**5*t**2 + 2*g2**2*r**3*t**2 - g2**2*r*t**2 - g2*r**5*t - g2*r**4*t**3 + 2*g2*r**3*t + 2*g2*r**2*t**3 - g2*r*t - g2*t**3)/(r**3*t**4)
+    b4 = -g1*g2*(g1*t + r*t**2 + 1)*(g2*r*t + r + t**2)*(g1**2*r + g1*g2*r**3 + g1*g2*r + g2**2*r**3 + r**4 - 2*r**2 + 1)/(r**3*t**4)
+
+    dL_sols = np.roots([b1, b2, b3, b4])
+
+    alphas = []
+    
+    s = sigma(r)
+    
+    for L in dL_sols:
+        E = d**2 - s*L*(s*L + 2)
+        for z in [( -d*(s*L + 1) + np.sqrt(E) ) / (s*(s*L + 2)),
+                  ( -d*(s*L + 1) - np.sqrt(E) ) / (s*(s*L + 2))]:
+            alphas.append(z*( (d + s*z)**2 + 1 ))
+    print(np.shape(alphas))        
     return alphas
 
 

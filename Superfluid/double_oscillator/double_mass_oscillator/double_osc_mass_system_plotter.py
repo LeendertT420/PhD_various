@@ -5,7 +5,7 @@ from matplotlib.patches import Rectangle
 from scipy.integrate import solve_ivp
 from matplotlib.gridspec import GridSpec
 
-from double_osc_eqs import *
+from double_osc_mass_eqs import *
 
 # -----------------------------
 # parameter ranges
@@ -13,14 +13,20 @@ from double_osc_eqs import *
 delta_min, delta_max = -5, 2
 deltas = np.linspace(delta_min, delta_max, 200)
 
-alpha_min, alpha_max = 0, 5
+alpha_min, alpha_max = 0, 3
+
+mu_min, mu_max = 1, 2
+mus = np.linspace(mu_min, mu_max, 200)
+
+tau_min, tau_max = 0.1, 4
+taus = np.linspace(tau_min, tau_max, 200)
 
 # -----------------------------
 # initial parameters
 # -----------------------------
 alpha0, delta0 = 0.0, 0.0
 tau0 = 1.0
-rho0 = 1.0
+mu0 = 1.0
 gamma10, gamma20 = 0.05, 0.05
 
 # ICs
@@ -46,6 +52,9 @@ ax3 = fig.add_subplot(gs[0, 1], projection='3d')  # (x1,v1,z)
 ax4 = fig.add_subplot(gs[1, 1], projection='3d')  # (x2,v2,z)
 ax5 = fig.add_subplot(gs[2, 0])                  # (x1,x2)
 
+ax5.set_xlim(tau_min, tau_max)
+ax5.set_ylim(mu_min, mu_max)
+
 # RIGHT COLUMN (time series)
 ax6 = fig.add_subplot(gs[0, 2])
 ax7 = fig.add_subplot(gs[1, 2])
@@ -53,7 +62,7 @@ ax7 = fig.add_subplot(gs[1, 2])
 # =============================
 # BIFURCATION
 # =============================
-ax1.fill_between(deltas, alpha_min, alpha_max, color='lightblue', alpha=0.3)
+#ax1.fill_between(deltas, alpha_min, alpha_max, color='lightblue', alpha=0.3)
 
 bif_lower, = ax1.plot([], [], 'k', lw=2)
 bif_upper, = ax1.plot([], [], 'k', lw=2)
@@ -61,6 +70,14 @@ lasing_line1, = ax1.plot([], [], 'r', lw=1)
 lasing_line2, = ax1.plot([], [], 'r', lw=1)
 lasing_line3, = ax1.plot([], [], 'r', lw=1)
 lasing_lines = [lasing_line1, lasing_line2, lasing_line3]
+ax1.fill_between([], [], [], alpha=0.3, color='r', label='1 limit cycles')
+ax1.fill_between([], [], [], alpha=0.3, color='b', label='2 limit cycles')
+state = {
+    "shade_1cycle_down": ax1.fill_between([], [], [], alpha=0.3, color='r'),
+    "shade_1cycle_up": ax1.fill_between([], [], [], alpha=0.3, color='r', label='1 limit cycles'),
+    "shade_2cycles": ax1.fill_between([], [], [], alpha=0.3, color='b', label='2 limit cycles'),
+    "shade_bif": ax1.fill_between([], [], [], alpha=0.3, color='g'),
+}
 
 point, = ax1.plot([], [], 'ko')
 
@@ -77,7 +94,7 @@ scatters = [ax2.scatter([], [], color=c, s=10) for c in colors]
 
 ax2.axhline(0, color='gray')
 ax2.axvline(0, color='gray')
-ax2.set_xlim(-.2, .4)
+ax2.set_xlim(-.1, .1)
 ax2.set_ylim(-1.5, 1.5)
 ax2.set_title("Eigenvalues")
 
@@ -87,11 +104,13 @@ ax2.set_title("Eigenvalues")
 traj1, = ax3.plot([], [], [], 'k')
 traj2, = ax4.plot([], [], [], 'k')
 
-traj12, = ax5.plot([], [], 'k')
+limit_cycle_bif_upper, = ax5.plot([], [], 'k')
+limit_cycle_bif_lower, = ax5.plot([], [], 'k')
+point2, = ax5.plot([], [], 'ko')
 
 ax3.set_title("(x1, v1, z)")
 ax4.set_title("(x2, v2, z)")
-ax5.set_title("(x1, x2)")
+ax5.set_title("bifurcation")
 
 # =============================
 # TIME SERIES
@@ -107,7 +126,7 @@ line_v2, = ax7.plot([], [], label='v2')
 
 ax7.set_title("Oscillator 2")
 
-for ax in [ax6, ax7]:
+for ax in [ax1, ax6, ax7]:
     ax.legend()
 
 # =============================
@@ -150,9 +169,9 @@ def make_slider_with_box(x, y, label, vmin, vmax, vinit, step=None):
 
 sA = make_slider(0.5, 0.23, 'α', 0, 5, alpha0)
 sD = make_slider(0.75, 0.23, 'δ', delta_min, delta_max, delta0)
-sT = make_slider(0.5, 0.19, 'τ', 0.1, 5, tau0)
+sT = make_slider(0.5, 0.19, 'τ', tau_min, tau_max, tau0)
 
-srho = make_slider(0.75, 0.19, r'$\rho$', 1, 2, rho0, step=.01)
+smu = make_slider(0.75, 0.19, r'$\mu$', mu_min, mu_max, mu0, step=.01)
 
 sG1 = make_slider(0.75, 0.15, 'γ1', 0, 2, gamma10)
 sG2 = make_slider(0.5, 0.15, 'γ2', 0, 2, gamma20)
@@ -166,27 +185,44 @@ sTime = make_slider(0.75, 0.07, 'T', 1, 500, T0)
 # UPDATE
 # =============================
 def update(val):
+    for lasing_line in lasing_lines:
+        lasing_line.set_data([], [])
+    for key in state:
+        if state[key] in ax1.collections:
+            state[key].remove()
 
     alpha, delta = sA.val, sD.val
     tau = sT.val
-    rho = srho.val
+    mu = smu.val
     g1, g2 = sG1.val, sG2.val
 
     T = sTime.val
 
     # bifurcation
-    bif_lower.set_data(deltas, lower_boundary(deltas, rho))
-    bif_upper.set_data(deltas, upper_boundary(deltas, rho))
+    bif_lower.set_data(deltas, lower_boundary(deltas))
+    bif_upper.set_data(deltas, upper_boundary(deltas))
 
-    thresholds = lasing_threshold(deltas, tau, rho, g1, g2)
-    print(np.shape(thresholds))
-    for threshold, lasing_line in zip(thresholds, lasing_lines):
-        lasing_line.set_data(deltas, threshold)
+    state["shade_bif"] = ax1.fill_between(deltas, lower_boundary(deltas), upper_boundary(deltas), alpha=0.3, color='g')
 
+    thresholds = lasing_threshold(deltas, tau, mu, g1, g2)
+    if len(thresholds) == 1:
+        lasing_lines[0].set_data(deltas, thresholds[0])
+        state["shade_1cycle_up"] = ax1.fill_between(deltas, thresholds[0], np.full_like(deltas, alpha_max), alpha=0.3, color='r')
+    elif len(thresholds) == 3:
+        for threshold, lasing_line in zip(thresholds, lasing_lines):
+            lasing_line.set_data(deltas, threshold)
+        state["shade_1cycle_up"] = ax1.fill_between(deltas, thresholds[0], thresholds[1], alpha=0.3, color='r')
+        state["shade_1cycle_down"] = ax1.fill_between(deltas, thresholds[2], np.full_like(deltas, alpha_max), alpha=0.3, color='r')
+        state["shade_2cycles"] = ax1.fill_between(deltas, thresholds[1], thresholds[2], alpha=0.3, color='b')
+    ax1.legend()
     point.set_data([delta], [alpha])
 
+    #print(limit_cycle_bifurcation_lower((g1 + g2)/2, taus))
+    #limit_cycle_bif_lower.set_data(mus, lasing_threshold(delta, tau, mus, g1, g2))
+    #point2.set_data([tau], [mu])
+
     # eigenvalues
-    roots, eigvals, eigvecs = compute_eigs(alpha, delta, tau, rho, g1, g2)
+    roots, eigvals, eigvecs = compute_eigs(alpha, delta, tau, mu, g1, g2)
 
     if not hasattr(update, "eig_quivers"):
         update.eig_quivers = []
@@ -203,7 +239,7 @@ def update(val):
         for j, (l, v) in enumerate(zip(vals, vecs)):
             if np.isreal(l):
                 v = np.real(v)
-                print(v)
+                #print(v)
                 vnorm = scale * v / np.linalg.norm(v)
 
                 q = ax3.quiver(
@@ -250,7 +286,7 @@ def update(val):
     t_eval = np.linspace(0, T, 5000)
 
     sol = solve_ivp(
-        lambda t,y: system(t, y, alpha, delta, tau, rho, g1, g2),
+        lambda t,y: system(t, y, alpha, delta, tau, mu, g1, g2),
         (0, T), y0, t_eval=t_eval
     )
 
@@ -263,7 +299,8 @@ def update(val):
     traj2.set_data(x2, v2)
     traj2.set_3d_properties(z)
 
-    traj12.set_data(x1, x2)
+
+    
 
     # autoscale
     for ax, data in zip([ax3, ax4],
@@ -277,8 +314,7 @@ def update(val):
         ax.set_ylim(mins[1]-m[1], maxs[1]+m[1])
         ax.set_zlim(mins[2]-m[2], maxs[2]+m[2])
 
-    ax5.set_xlim(x1.min(), x1.max())
-    ax5.set_ylim(x2.min(), x2.max())
+
 
     # time series
     line_x1.set_data(t_eval, x1)
@@ -301,7 +337,7 @@ def update(val):
     fig.canvas.draw_idle()
 
 # connect sliders
-for s in [sA,sD,sT,srho,sG1,sG2,sX10,sX20,sTime]:
+for s in [sA,sD,sT,smu,sG1,sG2,sX10,sX20,sTime]:
     s.on_changed(update)
 
 update(None)

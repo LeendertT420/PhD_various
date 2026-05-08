@@ -89,8 +89,8 @@ traj2, = ax4.plot([], [], [], 'k')
 
 traj12, = ax5.plot([], [], 'k')
 
-ax3.set_title(r"$(x_+,\,v_+,\,z)$")
-ax4.set_title(r"$(x_-,\,v_-,\,z)$")
+ax3.set_title(r"$(x_+,\,x_-,\,z)$")
+ax4.set_title(r"$(x_+,\,x_-,\,t)$")
 ax5.set_title("(x1, x2)")
 
 # =============================
@@ -152,7 +152,7 @@ sA = make_slider(0.5, 0.23, r'$\alpha$', 0, 5, alpha0, step=.01)
 sD = make_slider(0.75, 0.23, r'$\delta$', delta_min, delta_max, delta0, step=.01)
 sT = make_slider(0.5, 0.19, r'$\tau$', 0.1, 5, tau0)
 
-srho = make_slider(0.75, 0.19, r'$\rho$', 0.1, 3, rho0, step=.1)
+srho = make_slider(0.75, 0.19, r'$\rho$', 1, 2, rho0, step=.001)
 
 sG1 = make_slider(0.75, 0.15, r'$\gamma_1$', 0, 2, gamma10, step=.01)
 sG2 = make_slider(0.5, 0.15, r'$\gamma_2$', 0, 2, gamma20, step=.01)
@@ -175,15 +175,15 @@ def update(val):
     T = sTime.val
 
     # bifurcation
-    bif_lower.set_data(deltas, lower_boundary(deltas, rho)*sigma(rho))
-    bif_upper.set_data(deltas, upper_boundary(deltas, rho)*sigma(rho))
+    bif_lower.set_data(deltas, lower_boundary(deltas, rho))
+    bif_upper.set_data(deltas, upper_boundary(deltas, rho))
 
     thresholds = lasing_threshold(deltas, tau, rho, g1, g2)
 
     for threshold, lasing_line in zip(thresholds, lasing_lines):
-        lasing_line.set_data(deltas, threshold*sigma(rho))
+        lasing_line.set_data(deltas, threshold)
 
-    point.set_data([delta], [alpha*sigma(rho)])
+    point.set_data([delta], [alpha])
 
     # eigenvalues
     roots, eigvals, eigvecs = compute_eigs(alpha, delta, tau, rho, g1, g2)
@@ -281,17 +281,17 @@ def update(val):
     x1, v1, x2, v2, z = sol.y
 
     # trajectories
-    traj1.set_data(x1+x2, v1+v2)
+    traj1.set_data(x1+x2, x1-x2)
     traj1.set_3d_properties(z)
 
-    traj2.set_data(x1-x2, v1-v2)
-    traj2.set_3d_properties(z)
+    traj2.set_data(x1+x2, x1-x2)
+    traj2.set_3d_properties(t_eval)
 
     traj12.set_data(x1, x2)
 
     # autoscale
     for ax, data in zip([ax3, ax4],
-                       [(x1+x2,v1+v2,z), (x1-x2,v1-v2,z)]):
+                       [(x1+x2, x1-x2,z), (x1+x2, x1-x2,t_eval)]):
 
         mins = [d.min() for d in data]
         maxs = [d.max() for d in data]
