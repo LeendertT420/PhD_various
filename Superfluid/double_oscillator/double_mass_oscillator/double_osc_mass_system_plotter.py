@@ -7,15 +7,17 @@ from matplotlib.gridspec import GridSpec
 
 from double_osc_mass_eqs import *
 
+verbose = True
+
 # -----------------------------
 # parameter ranges
 # -----------------------------
 delta_min, delta_max = -5, 2
 deltas = np.linspace(delta_min, delta_max, 200)
 
-alpha_min, alpha_max = 0, 3
+alpha_min, alpha_max = 0, 2.5
 
-mu_min, mu_max = 1, 2
+mu_min, mu_max = 1, 3.5
 mus = np.linspace(mu_min, mu_max, 200)
 
 tau_min, tau_max = 0.1, 4
@@ -24,9 +26,9 @@ taus = np.linspace(tau_min, tau_max, 200)
 # -----------------------------
 # initial parameters
 # -----------------------------
-alpha0, delta0 = 0.0, 0.0
+alpha0, delta0 = 0.3, 0.0
 tau0 = 1.0
-mu0 = 1.0
+mu0 =  3.3523
 gamma10, gamma20 = 0.05, 0.05
 
 # ICs
@@ -69,7 +71,8 @@ bif_upper, = ax1.plot([], [], 'k', lw=2)
 lasing_line1, = ax1.plot([], [], 'r', lw=1)
 lasing_line2, = ax1.plot([], [], 'r', lw=1)
 lasing_line3, = ax1.plot([], [], 'r', lw=1)
-lasing_lines = [lasing_line1, lasing_line2, lasing_line3]
+lasing_line4, = ax1.plot([], [], 'r', lw=1)
+lasing_lines = [lasing_line1, lasing_line2, lasing_line3, lasing_line4]
 ax1.fill_between([], [], [], alpha=0.3, color='r', label='1 limit cycles')
 ax1.fill_between([], [], [], alpha=0.3, color='b', label='2 limit cycles')
 state = {
@@ -86,6 +89,7 @@ ax1.set_ylim(alpha_min, alpha_max)
 ax1.set_xlabel(r'$\delta$')
 ax1.set_ylabel(r'$\alpha$')
 ax1.set_title("Bifurcation diagram")
+ax1.grid()
 
 # =============================
 # EIGENVALUES
@@ -94,8 +98,8 @@ scatters = [ax2.scatter([], [], color=c, s=10) for c in colors]
 
 ax2.axhline(0, color='gray')
 ax2.axvline(0, color='gray')
-ax2.set_xlim(-.1, .1)
-ax2.set_ylim(-1.5, 1.5)
+ax2.set_xlim(-.03, .03)
+ax2.set_ylim(0, 1.5)
 ax2.set_title("Eigenvalues")
 
 # =============================
@@ -171,7 +175,7 @@ sA = make_slider(0.5, 0.23, 'α', 0, 5, alpha0)
 sD = make_slider(0.75, 0.23, 'δ', delta_min, delta_max, delta0)
 sT = make_slider(0.5, 0.19, 'τ', tau_min, tau_max, tau0)
 
-smu = make_slider(0.75, 0.19, r'$\mu$', mu_min, mu_max, mu0, step=.01)
+smu = make_slider(0.75, 0.19, r'$\mu$', mu_min, mu_max, mu0, step=.0001)
 
 sG1 = make_slider(0.75, 0.15, 'γ1', 0, 2, gamma10)
 sG2 = make_slider(0.5, 0.15, 'γ2', 0, 2, gamma20)
@@ -185,6 +189,7 @@ sTime = make_slider(0.75, 0.07, 'T', 1, 500, T0)
 # UPDATE
 # =============================
 def update(val):
+    if verbose: print('________________________________')
     for lasing_line in lasing_lines:
         lasing_line.set_data([], [])
     for key in state:
@@ -205,14 +210,17 @@ def update(val):
     state["shade_bif"] = ax1.fill_between(deltas, lower_boundary(deltas), upper_boundary(deltas), alpha=0.3, color='g')
 
     thresholds = lasing_threshold(deltas, tau, mu, g1, g2)
+    for threshold, lasing_line in zip(thresholds, lasing_lines):
+            lasing_line.set_data(deltas, threshold)
     if len(thresholds) == 1:
-        lasing_lines[0].set_data(deltas, thresholds[0])
         state["shade_1cycle_up"] = ax1.fill_between(deltas, thresholds[0], np.full_like(deltas, alpha_max), alpha=0.3, color='r')
     elif len(thresholds) == 3:
-        for threshold, lasing_line in zip(thresholds, lasing_lines):
-            lasing_line.set_data(deltas, threshold)
         state["shade_1cycle_up"] = ax1.fill_between(deltas, thresholds[0], thresholds[1], alpha=0.3, color='r')
         state["shade_1cycle_down"] = ax1.fill_between(deltas, thresholds[2], np.full_like(deltas, alpha_max), alpha=0.3, color='r')
+        state["shade_2cycles"] = ax1.fill_between(deltas, thresholds[1], thresholds[2], alpha=0.3, color='b')
+    elif len(thresholds) == 4:
+        state["shade_1cycle_up"] = ax1.fill_between(deltas, thresholds[0], thresholds[1], alpha=0.3, color='r')
+        state["shade_1cycle_down"] = ax1.fill_between(deltas, thresholds[2], thresholds[3], alpha=0.3, color='r')
         state["shade_2cycles"] = ax1.fill_between(deltas, thresholds[1], thresholds[2], alpha=0.3, color='b')
     ax1.legend()
     point.set_data([delta], [alpha])
@@ -223,6 +231,7 @@ def update(val):
 
     # eigenvalues
     roots, eigvals, eigvecs = compute_eigs(alpha, delta, tau, mu, g1, g2)
+
 
     if not hasattr(update, "eig_quivers"):
         update.eig_quivers = []
@@ -317,9 +326,9 @@ def update(val):
 
 
     # time series
-    line_x1.set_data(t_eval, x1)
-    line_v1.set_data(t_eval, v1)
-    line_z1.set_data(t_eval, z)
+    line_x1.set_data(t_eval, (x1+x2)/2)
+    #line_v1.set_data(t_eval, v1)
+    #line_z1.set_data(t_eval, z)
 
     line_x2.set_data(t_eval, x2)
     line_v2.set_data(t_eval, v2)

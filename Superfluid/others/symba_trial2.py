@@ -1,111 +1,138 @@
+import sympy as sp
 import numpy as np
-from sympy import symbols, Matrix, lambdify
 
-# =========================================================
-# 1. SYMBOLIC DEFINITIONS
-# =========================================================
 
-rho, gamma1, gamma2, tau, dL = symbols(
-    'rho gamma1 gamma2 tau dL', real=True
+
+def derive_threshold_polynomials(mu_vals, gamma_vals, tau):
+    """
+    Derive the omega^2 polynomial equation:
+    
+        g_Re*h_Im - g_Im*h_Re = 0
+    
+    and solve for omega^2.
+    """
+
+    N = len(mu_vals)
+
+    # Symbols
+    lam = sp.symbols('lambda')
+    omega = sp.symbols('omega', real=True)
+    x = sp.symbols('x', real=True)   # x = omega^2
+
+    # Construct J0
+    J0 = construct_J0(mu_vals, gamma_vals, tau)
+
+    dim = J0.shape[0]
+
+    # ------------------------------------------------------------
+    # Characteristic polynomial g(lambda)
+    # ------------------------------------------------------------
+
+    M = J0 - lam * sp.eye(dim)
+
+    g = sp.expand(M.det())
+
+    # ------------------------------------------------------------
+    # Construct B(lambda)
+    #
+    # Remove:
+    #   row = last row
+    #   col = first column
+    # ------------------------------------------------------------
+
+    B = M.copy()
+
+    B.row_del(dim - 1)
+    B.col_del(0)
+
+    h = sp.expand(B.det() / tau)
+
+    # ------------------------------------------------------------
+    # Substitute lambda = i*omega
+    # ------------------------------------------------------------
+
+    gi = sp.expand(g.subs(lam, sp.I * omega))
+    hi = sp.expand(h.subs(lam, sp.I * omega))
+
+    # ------------------------------------------------------------
+    # Separate real and imaginary parts
+    # ------------------------------------------------------------
+
+    g_re = sp.expand(sp.re(gi))
+    g_im = sp.expand(sp.im(gi) / omega)
+
+    h_re = sp.expand(sp.re(hi))
+    h_im = sp.expand(sp.im(hi) / omega)
+
+    # ------------------------------------------------------------
+    # Convert to polynomials in omega^2
+    # ------------------------------------------------------------
+
+    substitutions = {
+        omega**2: x
+    }
+
+    g_re = sp.expand(g_re.subs(substitutions))
+    g_im = sp.expand(g_im.subs(substitutions))
+
+    h_re = sp.expand(h_re.subs(substitutions))
+    h_im = sp.expand(h_im.subs(substitutions))
+
+    # ------------------------------------------------------------
+    # Elimination polynomial
+    # ------------------------------------------------------------
+
+    threshold_poly = sp.expand(g_re*h_im - g_im*h_re)
+
+    threshold_poly = sp.collect(threshold_poly, x)
+
+    # Convert to explicit polynomial in x
+    poly_x = sp.Poly(threshold_poly, x)
+
+    # Solve for omega^2
+    omega2_solutions = sp.solve(poly_x, x)
+
+    return {
+        "g(lambda)": g,
+        "h(lambda)": h,
+        "g_Re(x)": g_re,
+        "g_Im(x)": g_im,
+        "h_Re(x)": h_re,
+        "h_Im(x)": h_im,
+        "threshold_polynomial": threshold_poly,
+        "omega2_solutions": omega2_solutions,
+    }
+
+
+# ============================================================
+# Example
+# ============================================================
+
+mu_vals = [1.0, 1.2, 0.9]
+gamma_vals = [0.5, 0.6, 0.4]
+
+tau = sp.Rational(3, 2)
+
+result = derive_threshold_polynomials(
+    mu_vals,
+    gamma_vals,
+    tau
 )
 
-# Jacobian (IMPORTANT: uses dL = ∂L at fixed point)
-J = Matrix([
-    [0, 1, 0, 0, 0],
-    [-rho, -gamma1, 0, 0, 1],
-    [0, 0, 0, 1, 0],
-    [0, 0, -1/rho, -gamma2, 1],
-    [dL/tau, 0, dL/tau, 0, -1/tau]
-])
+print("\n=== g_Re(omega^2) ===")
+sp.pprint(result["g_Re(x)"])
 
-# =========================================================
-# 2. NUMERICAL JACOBIAN BUILDER
-# =========================================================
+print("\n=== g_Im(omega^2) ===")
+sp.pprint(result["g_Im(x)"])
 
-def J_numeric(rho_val, g1, g2, tau_val, dL_val):
-    return np.array([
-        [0, 1, 0, 0, 0],
-        [-rho_val, -g1, 0, 0, 1],
-        [0, 0, 0, 1, 0],
-        [0, 0, -1/rho_val, -g2, 1],
-        [dL_val/tau_val, 0, dL_val/tau_val, 0, -1/tau_val]
-    ], dtype=float)
+print("\n=== h_Re(omega^2) ===")
+sp.pprint(result["h_Re(x)"])
 
-# =========================================================
-# 3. NONLINEAR GAIN SLOPE (THIS IS WHAT MATTERS)
-# =========================================================
+print("\n=== h_Im(omega^2) ===")
+sp.pprint(result["h_Im(x)"])
 
-def dL_value(alpha, delta, x_plus):
-    """
-    derivative of L(x+) at fixed point
-    """
-    denom = (delta + x_plus)**2 + 1
-    return -2 * alpha * (delta + x_plus) / (denom**2)
+print("\n=== Threshold polynomial ===")
+sp.pprint(result["threshold_polynomial"])
 
-# =========================================================
-# 4. EIGENVALUE ANALYSIS
-# =========================================================
-
-def eigenvalues(rho_val, g1, g2, tau_val, dL_val):
-    Jmat = J_numeric(rho_val, g1, g2, tau_val, dL_val)
-    return np.linalg.eigvals(Jmat)
-
-# =========================================================
-# 5. HOPF DETECTION (CORRECT CRITERION)
-# =========================================================
-
-def is_hopf(eigs, tol=1e-6):
-    """
-    Hopf if a complex conjugate pair is ~pure imaginary
-    """
-    count = 0
-    for ev in eigs:
-        if abs(ev.real) < tol and abs(ev.imag) > tol:
-            count += 1
-    return count >= 2
-
-# =========================================================
-# 6. THRESHOLD SEARCH IN α
-# =========================================================
-
-def find_lasing_threshold(alpha_values, x_plus, rho, gamma1, gamma2, tau, delta):
-
-    for alpha in alpha_values:
-
-        # compute slope of gain at operating point
-        dL = dL_value(alpha, delta, x_plus)
-
-        # compute eigenvalues
-        eigs = eigenvalues(rho, gamma1, gamma2, tau, dL)
-
-        # check Hopf condition
-        if is_hopf(eigs):
-
-            print("\n=== HOPF DETECTED ===")
-            print("alpha =", alpha)
-            print("eigenvalues =", eigs)
-            print("dL =", dL)
-
-            return alpha
-
-    return None
-
-# =========================================================
-# 7. OPTIONAL: RUN EXAMPLE
-# =========================================================
-
-if __name__ == "__main__":
-
-    alpha_vals = np.linspace(0.1, 50, 500)
-
-    threshold = find_lasing_threshold(
-        alpha_vals,
-        x_plus=1.0,     # operating point
-        rho=1.5,
-        gamma1=0.5,
-        gamma2=0.5,
-        tau=2.0,
-        delta=0.2
-    )
-
-    print("\nFinal threshold:", threshold)
+print("\n=== omega^2 solutions ===")
+sp.pprint(result["omega2_solutions"])
