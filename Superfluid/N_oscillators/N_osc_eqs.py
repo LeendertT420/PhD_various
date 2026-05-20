@@ -1,6 +1,7 @@
 import numpy as np
 import sympy as sp
 from scipy.special import jn_zeros
+from scipy.optimize import root_scalar
 import warnings
 warnings.filterwarnings('ignore')  # Suppress all warnings
 
@@ -61,6 +62,95 @@ def lasing_threshold(N, threshold_polys, t, d):
     if verbose: print(f'\tthresholds shape:{np.shape(thresholds)}')
     
     filtered_thresholds = thresholds#filter_arrays(thresholds)
+    #print(thresholds, filtered_thresholds)
+    if verbose: print(f'\tthresholds shape (after filtering):{np.shape(filtered_thresholds)}')
+
+    alphas_sorted = sorted(filtered_thresholds, key=lambda a: np.min(a))
+    print(alphas_sorted)
+    return alphas_sorted
+
+def find_pure_imag_crossings(mus, gs, t,
+                              dL_min, dL_max,
+                              num_scan_points=500):
+
+    J0 = construct_J0(mus, gs, t, symbolic=False)
+
+    def eigen_decomposition(dL):
+        J = J0.copy()
+        J[-1, 0] = dL / t
+        eigvals = np.linalg.eigvals(J)
+
+        # IMPORTANT: ordering is by imaginary part (physical spectrum)
+        idx = np.argsort(np.imag(eigvals))
+        return eigvals[idx]
+
+    def real_parts(dL):
+        return np.real(eigen_decomposition(dL))
+
+    dLs = np.linspace(dL_min, dL_max, num_scan_points)
+
+    roots = []
+
+    prev = real_parts(dLs[0])
+
+    for i in range(1, len(dLs)):
+        curr = real_parts(dLs[i])
+
+        for k in range(len(prev)):
+
+            f1 = prev[k]
+            f2 = curr[k]
+
+            # detect crossing of imaginary axis
+            if f1 * f2 < 0 or f1 == 0 or f2 == 0:
+
+                def f(dL, k=k):
+                    vals = real_parts(dL)[k]
+                    return vals
+
+                sol = root_scalar(
+                    f,
+                    bracket=[dLs[i - 1], dLs[i]],
+                    method='brentq'
+                )
+
+                if sol.converged:
+                    roots.append(sol.root)
+
+        prev = curr
+
+    return np.unique(np.round(roots, 10))
+
+
+
+def lasing_threshold2(N, d, t, mus, gs, num_scan_points=500):
+    if isinstance(d, (np.ndarray, list)):
+        d_max = np.max(np.abs([d[0], d[-1]]))
+    else:
+        d_max = d
+
+    dL_min = (1+np.sqrt(1+d_max**2))/2
+    dL_max = (1-np.sqrt(1+d_max**2))/2
+
+    dL_sols = find_pure_imag_crossings(mus, gs, t, dL_min, dL_max, num_scan_points=num_scan_points)
+
+    
+    if verbose: print(f'\tdL solutions: {dL_sols} {np.shape(dL_sols)}')
+
+    z_sols = []
+
+    for sol in dL_sols:
+        D = d**2 - sol*(sol+2)
+        z_sols.append( (-d*(sol+1) + np.sqrt(D)) / (N*(sol+2)) )
+        #z_sols.append( (-d*(sol+1) - np.sqrt(D)) / (N*(sol+2)) )
+
+    z_sols = np.array(z_sols)
+    if verbose: print(f'\tz solutions shape:{np.shape(z_sols)}')
+
+    thresholds = z_sols * ((N*z_sols + d)**2 + 1)
+    if verbose: print(f'\tthresholds shape:{np.shape(thresholds)}')
+    
+    filtered_thresholds = filter_arrays(thresholds)
     #print(thresholds, filtered_thresholds)
     if verbose: print(f'\tthresholds shape (after filtering):{np.shape(filtered_thresholds)}')
 

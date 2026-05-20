@@ -15,11 +15,11 @@ np.set_printoptions(precision=4)
 # -----------------------------
 delta_min, delta_max = -5, 2
 deltas = np.linspace(delta_min, delta_max, 100)
-
-alpha_min, alpha_max = 0, 20
+0
+alpha_min, alpha_max = 0, np.abs(delta_min)
 alphas = np.linspace(alpha_min, alpha_max, 100)
 
-N_min, N_max = 2, 4
+N_min, N_max = 2, 25
 
 # -----------------------------
 # initial parameters
@@ -34,9 +34,9 @@ mus = mu_spectrum(N0)
 print(mus)
 gammas = np.full(N0, gamma)
 
-threshold_polys = []
-for N in range(N_min, N_max+1):
-    threshold_polys.append(derive_threshold_polynomials(mu_spectrum(N), np.full(N, gamma), tau0))
+#threshold_polys = []
+#for N in range(N_min, N_max+1):
+#    threshold_polys.append(derive_threshold_polynomials(mu_spectrum(N), np.full(N, gamma), tau0))
 
 # ICs
 x0 = np.zeros(N0)
@@ -70,16 +70,16 @@ bif_lower, = ax1.plot([], [], 'k', lw=2)
 bif_upper, = ax1.plot([], [], 'k', lw=2)
 
 lasing_lines = []
-for i in range(4*N0-2):
+for i in range(40):
     lasing_line, = ax1.plot([], [], 'r', lw=1)
     lasing_lines.append(lasing_line)
 
 point, = ax1.plot([], [], 'ko')
 
 ax1.set_xlim(delta_min, delta_max)
-ax1.set_ylim(alpha_min, alpha_max)
+ax1.set_ylim(alpha_min, N0*np.abs(delta_min))
 ax1.set_xlabel(r'$\delta$')
-ax1.set_ylabel(r'$N\alpha$')
+ax1.set_ylabel(r'$\alpha$')
 ax1.set_title("Bifurcation diagram")
 ax1.grid()
 
@@ -91,7 +91,7 @@ scatters = [ax2.scatter([], [], color=c, s=10) for c in ['r', 'g', 'b']]
 ax2.axhline(0, color='gray')
 ax2.axvline(0, color='gray')
 ax2.set_xlim(-0.03, 1)
-ax2.set_ylim(0, 3)
+ax2.set_ylim(0, 18)
 ax2.set_title("Eigenvalues")
 
 # =============================
@@ -166,21 +166,28 @@ def update(val):
     T = sTime.val
 
     mus = mu_spectrum(N)
-
+    #ax1.set_ylim(alpha_min, 2*abs(delta_min)*(abs(delta_min)**2-3)/N/27)
+    ax1.set_ylim(alpha_min, alpha_max)
     #mu_spectrum(N0)
     gammas = np.full(N, gamma)
 
     # bifurcation
-    bif_lower.set_data(deltas, N*lower_boundary(N, deltas))
-    bif_upper.set_data(deltas, N*upper_boundary(N, deltas))
+    bif_lower.set_data(deltas, lower_boundary(N, deltas))
+    bif_upper.set_data(deltas, upper_boundary(N, deltas))
 
     
-    thresholds = lasing_threshold(N, threshold_polys[N-2], tau, deltas)
+    thresholds = lasing_threshold2(N, deltas, tau, mus, gammas)
 
-    for threshold, lasing_line in zip(thresholds, lasing_lines):
-        lasing_line.set_data(deltas, N*threshold)
+    for lasing_line in lasing_lines:
+        lasing_line.set_data([], [])
 
-    point.set_data([delta], [N*alpha])
+    for i, lasing_line in enumerate(lasing_lines):
+        if i < len(thresholds):
+            lasing_line.set_data(deltas, thresholds[i])
+        else:
+            lasing_line.set_data([], [])
+
+    point.set_data([delta], [alpha])
 
     # eigenvalues
     roots, eigvals, eigvecs = compute_eigs(N, mus, alpha, delta, tau, gammas)
