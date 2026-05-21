@@ -1,225 +1,482 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.widgets import Slider, TextBox
+from matplotlib.widgets import Slider, TextBox, CheckButtons
 from matplotlib.patches import Rectangle
 from scipy.integrate import solve_ivp
 from matplotlib.gridspec import GridSpec
 
 from N_osc_eqs import *
 
-verbose = True
+# ============================================================
+# SETTINGS
+# ============================================================
+verbose = False
 np.set_printoptions(precision=4)
 
-# -----------------------------
-# parameter ranges
-# -----------------------------
+plt.rcParams.update({
+    "font.family": "serif",
+    "mathtext.fontset": "cm",
+})
+
+gamma = 0.05
+colors = ['r', 'b', 'g', 'm']
+
+# ============================================================
+# PARAMETER GRIDS (BIFURCATION MAP)
+# ============================================================
 delta_min, delta_max = -5, 2
-deltas = np.linspace(delta_min, delta_max, 100)
-0
-alpha_min, alpha_max = 0, np.abs(delta_min)
-alphas = np.linspace(alpha_min, alpha_max, 100)
+alpha_min, alpha_max = 0, 1
+
+N_delta = 100
+N_alpha = 100
+
+deltas = np.linspace(delta_min, delta_max, N_delta)
+deltas_eff = np.linspace(0, delta_max, N_delta)
+alphas = np.linspace(alpha_min, alpha_max, N_alpha)
+
+D, A = np.meshgrid(deltas, alphas, indexing='ij')
+Z = np.zeros((N_delta, N_alpha))
+
+D_eff, A = np.meshgrid(deltas_eff, alphas, indexing='ij')
+Z_eff = np.zeros((N_delta, N_alpha))
 
 N_min, N_max = 2, 25
 
-# -----------------------------
-# initial parameters
-# -----------------------------
-alpha0, delta0 = 0.3, 0.0
+# ============================================================
+# INITIAL PARAMETERS
+# ============================================================
+alpha0, delta0 = 0, 0
 tau0 = 1.0
 N0 = 2
+T0 = 100
 
-gamma = 0.05
 mus = mu_spectrum(N0)
-#
-print(mus)
 gammas = np.full(N0, gamma)
 
-#threshold_polys = []
-#for N in range(N_min, N_max+1):
-#    threshold_polys.append(derive_threshold_polynomials(mu_spectrum(N), np.full(N, gamma), tau0))
-
-# ICs
+# ============================================================
+# INITIAL CONDITIONS
+# ============================================================
 x0 = np.zeros(N0)
 y0 = np.zeros(N0)
 z0 = 0.0
-T0 = 100
 
-colors = ['r', 'b', 'g', 'm']
-
-# -----------------------------
-# FIGURE
-# -----------------------------
+# ============================================================
+# FIGURE LAYOUT
+# ============================================================
 fig = plt.figure(figsize=(16, 10))
 fig.subplots_adjust(bottom=0.32)
-gs = GridSpec(2, 2, hspace=0.4, wspace=0.3)
 
-# LEFT COLUMN
+gs = GridSpec(2, 3, hspace=0.4, wspace=0.3)
+
 ax1 = fig.add_subplot(gs[0, 0])  # bifurcation
 ax2 = fig.add_subplot(gs[1, 0])  # eigenvalues
+ax3 = fig.add_subplot(gs[0, 1])  # time trace
+ax4 = fig.add_subplot(gs[1, 1])  # threshold panel
+ax5 = fig.add_subplot(gs[0, 2])
+ax6 = fig.add_subplot(gs[1, 2])
 
-# CENTER COLUMN
-ax3 = fig.add_subplot(gs[0, 1])  # timetrace
-ax4 = fig.add_subplot(gs[1, 1])  # open
-
-# =============================
-# BIFURCATION
-# =============================
+# ============================================================
+# ============================================================
+# 1. BIFURCATION PANEL (ax1)
+# ============================================================
+# background
 ax1.fill_between(deltas, alpha_min, alpha_max, color='lightblue', alpha=0.3)
 
+# curves
 bif_lower, = ax1.plot([], [], 'k', lw=2)
 bif_upper, = ax1.plot([], [], 'k', lw=2)
 
-lasing_lines = []
-for i in range(40):
-    lasing_line, = ax1.plot([], [], 'r', lw=1)
-    lasing_lines.append(lasing_line)
-
+lasing_lines = [ax1.plot([], [], 'r', lw=1)[0] for _ in range(4 * N_max - 2)]
 point, = ax1.plot([], [], 'ko')
 
+# heatmap (FIXED ORIENTATION)
+mesh = ax1.pcolormesh(D, A, Z, shading='auto', cmap='viridis')
+cbar = plt.colorbar(mesh, ax=ax1)
+cbar.set_label(r'$X^*$')
+
 ax1.set_xlim(delta_min, delta_max)
-ax1.set_ylim(alpha_min, N0*np.abs(delta_min))
+ax1.set_ylim(alpha_min, alpha_max)
 ax1.set_xlabel(r'$\delta$')
 ax1.set_ylabel(r'$\alpha$')
 ax1.set_title("Bifurcation diagram")
 ax1.grid()
 
-# =============================
-# EIGENVALUES
-# =============================
-scatters = [ax2.scatter([], [], color=c, s=10) for c in ['r', 'g', 'b']]
+# ============================================================
+# 2. THRESHOLD PANEL (ax2)
+# ============================================================
+bif_lower_eff, = ax2.plot([], [], 'k', lw=2)
+bif_upper_eff, = ax2.plot([], [], 'k', lw=2)
 
-ax2.axhline(0, color='gray')
-ax2.axvline(0, color='gray')
-ax2.set_xlim(-0.03, 1)
-ax2.set_ylim(0, 18)
-ax2.set_title("Eigenvalues")
+lasing_lines_eff = [ax2.plot([], [], 'r', lw=1)[0] for _ in range(4 * N_max - 2)]
+point_eff, = ax2.plot([], [], 'ko')
 
-# =============================
-# PHASE SPACE
-# =============================
+# heatmap (FIXED ORIENTATION)
+mesh_eff = ax2.pcolormesh(D_eff, A, Z_eff, shading='auto', cmap='viridis')
+cbar_eff = plt.colorbar(mesh_eff, ax=ax2)
+cbar_eff.set_label(r'$X^*$')
+
+ax2.set_xlabel(r'$\delta_{\mathrm{eff}}$')
+ax2.set_ylabel(r'$\alpha_c$')
+ax2.set_xlim(0, delta_max)
+ax2.set_ylim(alpha_min, alpha_max)
+ax2.set_title("Lasing thresholds")
+
+# ============================================================
+# 3. EIGENVALUE PANEL (ax2)
+# ============================================================
+scatters = [ax4.scatter([], [], color=c, s=10) for c in ['r', 'g', 'b']]
+
+ax4.axhline(0, color='gray')
+ax4.axvline(0, color='gray')
+
+ax4.set_xlim(-1, 1)
+ax4.set_ylim(-1, 18)
+ax4.set_title("Eigenvalues")
+ax4.set_xlabel('Real')
+ax4.set_ylabel('Imaginary')
+
+# ============================================================
+# 4. TIME TRACE PANEL (ax3)
+# ============================================================
 traj1, = ax3.plot([], [], 'k')
+offsets = [ax3.axhline(y=0, color=c) for c in ['r', 'g', 'b']]
 
-ax3.set_title("(X, T)")
-ax4.set_title("()")
+ax3.set_title("(X, t)")
+ax3.set_xlabel(r'$t$')
+ax3.set_ylabel(r'$NX$')
 
-# =============================
-# TIME SERIES
-# =============================
+# ============================================================
+# 4. MANIFOLDS
+# ============================================================
 
+real_img = ax5.imshow(
+    np.zeros((N0+1, N0+2)),
+    aspect='auto',
+    origin='lower',
+    cmap='viridis'
+)
 
-# =============================
+imag_img = ax6.imshow(
+    np.zeros((2*N0+1, N0+2)),
+    aspect='auto',
+    origin='lower',
+    cmap='viridis'
+)
+
+labels = [f"x{i+1}" for i in range(N0)] + ["z", "X"]
+
+ax5.set_xticks(range(N0+2))
+ax5.set_xticklabels(labels, rotation=90)
+
+ax6.set_xticks(range(N0+2))
+ax6.set_xticklabels(labels, rotation=90)
+
+# ============================================================
 # SLIDERS
-# =============================
-box = Rectangle((0.45, 0.02), 0.5, 0.25,
+# ============================================================
+box = Rectangle((0.05, 0.05), 0.9, 0.1,
                 transform=fig.transFigure,
                 fill=False, linewidth=2)
 fig.patches.append(box)
 
 
-def make_slider(x, y, label, vmin, vmax, vinit, step=None):
-    ax = fig.add_axes([x, y, 0.15, 0.02])
-    return Slider(ax, label, vmin, vmax, valinit=vinit, valstep=step)
-
 def make_slider_with_box(x, y, label, vmin, vmax, vinit, step=None):
-    # Slider
+    # slider axis
     ax_slider = fig.add_axes([x, y, 0.15, 0.02])
     slider = Slider(ax_slider, label, vmin, vmax, valinit=vinit, valstep=step)
 
-    # Text box (to the right)
-    ax_box = fig.add_axes([x + 0.17, y, 0.05, 0.03])
-    text_box = TextBox(ax_box, '', initial=str(vinit))
+    # textbox axis (to the right of slider)
+    ax_box = fig.add_axes([x + 0.154, y - 0.002, 0.06, 0.03])
+    textbox = TextBox(ax_box, "", initial=str(vinit))
 
-    # When slider moves → update text
-    def update_text(val):
-        text_box.set_val(f"{val:.3f}")
-    slider.on_changed(update_text)
+    # sync: slider → box
+    def slider_update(val):
+        textbox.set_val(f"{val:.4g}")
 
-    # When user types → update slider
-    def submit(text):
+    slider.on_changed(slider_update)
+
+    # sync: box → slider
+    def box_submit(text):
         try:
             val = float(text)
             if vmin <= val <= vmax:
                 slider.set_val(val)
         except ValueError:
-            pass
-    text_box.on_submit(submit)
+            pass  # ignore invalid input
 
-    return slider, text_box
+    textbox.on_submit(box_submit)
 
-sA = make_slider(0.5, 0.23, 'α', alpha_min, alpha_max, alpha0)
-sD = make_slider(0.75, 0.23, 'δ', delta_min, delta_max, delta0)
-sT = make_slider(0.5, 0.19, 'τ', 0.1, 5, tau0)
+    return slider, textbox
 
-sN = make_slider(0.75, 0.19, 'N', N_min, N_max, N0, step=1)
-sTime = make_slider(0.75, 0.07, 'T', 1, 500, T0)
 
-# =============================
-# UPDATE
-# =============================
-def update(val):
-    if verbose: print('____________________________')
+sA, boxA = make_slider_with_box(0.1, 0.11, 'α', alpha_min, alpha_max, alpha0)
+sD, boxD = make_slider_with_box(0.1, 0.07, r'$\delta$', delta_min, delta_max, delta0)
 
-    alpha, delta = sA.val, sD.val
+sT, boxT = make_slider_with_box(0.4, 0.11, 'τ', 0.1, 5, tau0)
+sN, boxN = make_slider_with_box(0.4, 0.07, 'N', N_min, N_max, N0, step=1)
+sTime, boxTime = make_slider_with_box(0.7, 0.07, 'T', 1, 500, T0)
+
+
+# ============================================================
+# CHECKBOX
+# ============================================================
+ax_check = plt.axes([0.85, 0.11, 0.1, 0.04])   # [left, bottom, width, height]
+
+check = CheckButtons(
+    ax_check,
+    ['Show cmap'],
+    [False]      # initially unabled
+)
+
+def toggle_cmap(label, mesh, cbar):
+    state = check.get_status()[0]
+
+    mesh.set_visible(state)
+    cbar.ax.set_visible(state)
+
+    fig.canvas.draw()
+
+# ============================================================
+# UPDATE FUNCTION
+# ============================================================
+def update(val, update_cmap=False, update_cmap_eff=True, update_solver=False, update_thresholds=False):
+
+    if verbose: print("Updating...")
+
+    #for scat, offset in zip(scatters, offsets):
+    #    scat.set_offsets([[]])
+    #    offset.set_ydata([])
+
+    alpha = sA.val
+    delta = sD.val
     tau = sT.val
     N = int(sN.val)
-
     T = sTime.val
-
+    # --------------------------------------------------------
+    # SYSTEM PARAMETERS
+    # --------------------------------------------------------
     mus = mu_spectrum(N)
-    #ax1.set_ylim(alpha_min, 2*abs(delta_min)*(abs(delta_min)**2-3)/N/27)
-    ax1.set_ylim(alpha_min, alpha_max)
-    #mu_spectrum(N0)
     gammas = np.full(N, gamma)
+    
 
-    # bifurcation
-    bif_lower.set_data(deltas, lower_boundary(N, deltas))
-    bif_upper.set_data(deltas, upper_boundary(N, deltas))
+    # --------------------------------------------------------
+    # BIFURCATION HEATMAP
+    # --------------------------------------------------------
+    if update_cmap:
+        for i in range(N_alpha):
+            for j in range(N_delta):
+                Z[j, i] = np.max(z_star_numba(N, A[j, i], D[j, i]))
+
+        mesh.set_array(Z.ravel(order='C'))
+        mesh.set_clim(min([Z.min(), Z_eff.min()]), max([Z.max(), Z_eff.max()]))
+
+    if update_cmap_eff:
+        for i in range(N_alpha):
+            for j in range(N_delta):
+                Z_eff[j, i] = z_star_eff(A[j, i], D_eff[j, i])
+
+        mesh_eff.set_array(Z_eff.ravel(order='C'))
+        mesh_eff.set_clim(min([Z.min(), Z_eff.min()]), max([Z.max(), Z_eff.max()]))
 
     
-    thresholds = lasing_threshold2(N, deltas, tau, mus, gammas)
+    # --------------------------------------------------------
+    # BIFURCATION CURVES
+    # --------------------------------------------------------
+    if update_thresholds:
+        thresholds = lasing_threshold(N, deltas, tau, mus, gammas)
 
-    for lasing_line in lasing_lines:
-        lasing_line.set_data([], [])
+        for i, line in enumerate(lasing_lines):
+            if i < len(thresholds):
+                line.set_data(deltas, thresholds[i])
+            else:
+                line.set_data([], [])
 
-    for i, lasing_line in enumerate(lasing_lines):
-        if i < len(thresholds):
-            lasing_line.set_data(deltas, thresholds[i])
-        else:
-            lasing_line.set_data([], [])
+        bif_lower.set_data(deltas, lower_boundary(N, deltas))
+        bif_upper.set_data(deltas, upper_boundary(N, deltas))
+        bif_lower.set_zorder(10)
+        bif_upper.set_zorder(10)
+
+
+        thresholds_eff = lasing_threshold(N, deltas, tau, mus, gammas,
+                                          as_func_off='delta_eff',
+                                          delta_effs=deltas_eff)
+
+        for i, line in enumerate(lasing_lines_eff):
+            if i < len(thresholds_eff):
+                line.set_data(np.linspace(0, delta_max, N_delta), thresholds_eff[i])
+            else:
+                line.set_data([], [])
+
+    delta_temp = deltas_eff - N*np.max(z_star(N, alpha, delta))
+    bif_lower_eff.set_data(deltas_eff, lower_boundary(N, delta_temp))
+    bif_upper_eff.set_data(deltas_eff, upper_boundary(N, delta_temp))
+    bif_lower_eff.set_zorder(10)
+    bif_upper_eff.set_zorder(10)
+
+        
 
     point.set_data([delta], [alpha])
 
-    # eigenvalues
+    point_eff.set_data(
+        [N * np.max(z_star_numba(N, alpha, delta)) + delta],
+        [alpha]
+        )
+
+    # --------------------------------------------------------
+    # EIGENVALUES
+    # --------------------------------------------------------
     roots, eigvals, eigvecs = compute_eigs(N, mus, alpha, delta, tau, gammas)
+    idx = np.argsort(np.real(roots))[::-1]
+
+    eigvals = eigvals[idx]
+    eigvecs = eigvecs[idx]
+
+    for i, (root, vals, vecs, scat) in enumerate(zip(roots, eigvals, eigvecs, scatters)):
+        scat.set_offsets(np.c_[vals.real, vals.imag])
+        print(np.c_[vals.real, vals.imag])
+        # remove all negative imaginary eigenvalues
+        mask = vals.imag >= -1e-8
+
+        # Filter
+        vals = vals[mask]
+        vecs = vecs[:, mask]
+
+        assert len(vals) == N + 1
+
+        # Sort by magnitude of imaginary part
+        idx = np.argsort(np.abs(vals.imag))
+
+        vals = vals[idx]
+        vecs = vecs[:, idx]
+
+        real_matrix = np.zeros((len(vals), N+2))
+        imag_matrix = np.zeros((len(vals), N+2))
+
+        for k in range(len(vals)):
+
+            vec = inverse_transform_matrix(N) @ vecs[:, k]
+
+            row = np.zeros(N)
+
+            if np.abs(np.imag(vals[k])) > 1e-10:
+                for i in range(N):
+                    e = np.zeros(2*N+1)
+                    e[2*i] = 1
+
+                    row[i] = np.linalg.norm(project_onto_plane(e, np.real(vec), np.imag(vec)))
+
+                e = np.zeros(2*N+1)
+                e[0:-1:2] = 1
+
+                X_comp = np.linalg.norm(project_onto_plane(e, np.real(vec), np.imag(vec)))
+            else:
+                e = np.zeros(2*N+1)
+                e[-1] = 1
+
+                z_comp = np.linalg.norm(project_onto_line(e, np.real(vec)))
+                
+                e = np.zeros(2*N+1)
+                e[0:-1:2] = 1
+
+                X_comp = np.linalg.norm(project_onto_line(e, np.real(vec)))
+            
+
+            row = np.concatenate([row, [z_comp, X_comp]])
+
+            real_matrix[k, :] = row
+            imag_matrix[k, :] = row
+
+        real_img.set_data(real_matrix)
+        imag_img.set_data(imag_matrix)
+
+        real_img.set_clim(-1, 1)
+        imag_img.set_clim(-1, 1)
+
+        print(np.sum(real_matrix, axis=0), np.sum(real_matrix, axis=1))
+
+        real_img.set_extent((-0.5, N + 1.5, -0.5, N + 0.5))
+        ax5.set_yticks(np.arange(N + 1))
+        ax5.set_xticks(np.arange(N + 2))
+
+        y_labels = []
+        for i in range(N + 1):
+            label = r'$\lambda$'
+            for digit in list(str(i)):
+                label += rf'$_{digit}$'
+            y_labels.append(label)
+
+        x_labels = []
+        for i in range(1, N + 1):
+            label = r'$x$'
+            for digit in list(str(i)):
+                label += rf'$_{digit}$'
+            x_labels.append(label)
+        x_labels += [r'$X$', r'$z$']
 
 
-    for i_root, (vals, vecs, scatter) in enumerate(zip(eigvals, eigvecs, scatters)):
+        ax5.set_yticklabels(y_labels)
+        ax5.set_xticklabels(x_labels, rotation=45, ha='right')
 
-        scatter.set_offsets(np.c_[vals.real, vals.imag])
+        real_img.set_clim(vmin=real_matrix.min(), vmax=real_matrix.max())
 
 
+        row_labels = [
+            f"{np.imag(ev):.2f}i"
+            for ev in vals
+        ]
 
-    # solve system
-    y0 = np.zeros(2*N+1)
-    t_eval = np.linspace(0, T, 5000)
-    sol = solve_ivp(
-        lambda time,X: system(time, X, alpha, delta, mus, gammas, tau),
-        (0, T), y0, t_eval=t_eval
-    )
-    #print(np.shape(sol.y))
-    X = np.sum(sol.y[:-1:2,:], axis=0)
-    #print(np.shape(X))
-    # trajectories
-    traj1.set_data(t_eval, X)
-    ax3.relim()
-    ax3.autoscale_view()
+        ax6.set_yticks(range(len(vals)))
+        ax6.set_yticklabels(row_labels)
+
+    # --------------------------------------------------------
+    # TIME EVOLUTION
+    # --------------------------------------------------------
+    if update_solver:
+        y0 = np.zeros(2 * N + 1)
+        t_eval = np.linspace(0, T, 5000)
+
+        sol = solve_ivp(
+            lambda t, X: system_numba(t, X, alpha, delta, mus, gammas, tau),
+            (0, T), y0, t_eval=t_eval
+        )
+
+        X = np.sum(sol.y[:-1:2, :], axis=0)
+
+        traj1.set_data(t_eval, X)
+        roots_sorted = np.sort(z_star_numba(N, alpha, delta))[::-1]
+        for offset, root in zip(offsets, roots_sorted):
+            offset.set_ydata([N * root])
+
+        ax3.relim()
+        ax3.autoscale_view()
+
+    mesh.set_visible(check.get_status()[0])
+    cbar.ax.set_visible(check.get_status()[0])
+    mesh_eff.set_visible(check.get_status()[0])
+    cbar_eff.ax.set_visible(check.get_status()[0])
+
 
     fig.canvas.draw_idle()
 
-# connect sliders
-for s in [sA,sD,sT,sN,sTime]:
-    s.on_changed(update)
+# ============================================================
+# CONNECT SLIDERS
+# ============================================================
+sA.on_changed(lambda val: update(val,
+                                 update_solver=True,))
+sD.on_changed(lambda val: update(val,
+                                 update_solver=True))
+sN.on_changed(lambda val: update(val,
+                                 update_cmap=True,
+                                 update_solver=True,
+                                 update_thresholds=True))
+sT.on_changed(lambda val: update(val,
+                                 update_solver=True,
+                                 update_thresholds=True))
+sTime.on_changed(lambda val: update(val,
+                                 update_solver=True))
 
 
-update(None)
+# initial draw
+update(None, update_cmap=True, update_cmap_eff=True, update_solver=True, update_thresholds=True)
+
 plt.show()

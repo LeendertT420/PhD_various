@@ -1,15 +1,11 @@
-import warnings
 import numpy as np
 import sympy as sp
 from scipy.special import jn_zeros
 from scipy.optimize import root_scalar
-from numba import njit
-
-
+import warnings
 warnings.filterwarnings('ignore')  # Suppress all warnings
 
-verbose = False
-
+verbose = True
 np.set_printoptions(precision=5)
 
 # -----------------------------
@@ -31,18 +27,53 @@ def mu_spectrum(i):
     return ( jn_zeros(1, i) / jn_zeros(1, 1) )**2
 
 
-def mu_spectrum_harmonic(i):
-    return np.sqrt(np.arange(1, i+1))
-
-
 # -----------------------------
 # lasing threshold
 # -----------------------------
+def lasing_threshold(N, threshold_polys, t, d):
+    if verbose: print('CALCULATING LASING THRESHOLD')
+    print(f'KANKER: {threshold_polys['omega2_solutions']}')
+    w2_sols = extract_real_entries(threshold_polys['omega2_solutions'])
+    #print(threshold_polys['threshold_polynomial'])
+    if verbose: print(f'\tw^2: {w2_sols} {np.shape(w2_sols)}')
+    
+    w2_sols = np.real(w2_sols[np.isreal(w2_sols)])
+    w2_sols = w2_sols[w2_sols>=0]
+    if verbose: print(f'\tw^2 (after filtering): {w2_sols} {np.shape(w2_sols)}')
+
+    dL_sols = []
+
+    for sol in w2_sols:
+        dL_sols.append(-t * np.polyval(threshold_polys['g_Re(x)'], sol) / np.polyval(threshold_polys['h_Re(x)'], sol))
+    
+    if verbose: print(f'\tdL solutions: {dL_sols} {np.shape(dL_sols)}')
+
+    z_sols = []
+
+    for sol in dL_sols:
+        D = d**2 - sol*(sol+2)
+        z_sols.append( (-d*(sol+1) + np.sqrt(D)) / (N*(sol+2)) )
+        z_sols.append( (-d*(sol+1) - np.sqrt(D)) / (N*(sol+2)) )
+
+    z_sols = np.array(z_sols)
+    if verbose: print(f'\tz solutions shape:{np.shape(z_sols)}')
+
+    thresholds = z_sols * ((N*z_sols + d)**2 + 1)
+    if verbose: print(f'\tthresholds shape:{np.shape(thresholds)}')
+    
+    filtered_thresholds = thresholds#filter_arrays(thresholds)
+    #print(thresholds, filtered_thresholds)
+    if verbose: print(f'\tthresholds shape (after filtering):{np.shape(filtered_thresholds)}')
+
+    alphas_sorted = sorted(filtered_thresholds, key=lambda a: np.min(a))
+    print(alphas_sorted)
+    return alphas_sorted
+
 def find_pure_imag_crossings(mus, gs, t,
                               dL_min, dL_max,
-                              num_scan_points=250):
+                              num_scan_points=500):
 
-    J0 = construct_J0(mus, gs, t)
+    J0 = construct_J0(mus, gs, t, symbolic=False)
 
     def eigen_decomposition(dL):
         J = J0.copy()
@@ -92,46 +123,39 @@ def find_pure_imag_crossings(mus, gs, t,
 
 
 
-def lasing_threshold(N, d, t, mus, gs, num_scan_points=250, as_func_off='delta', delta_effs=None):
+def lasing_threshold2(N, d, t, mus, gs, num_scan_points=500):
     if isinstance(d, (np.ndarray, list)):
         d_max = np.max(np.abs([d[0], d[-1]]))
     else:
         d_max = d
 
-    dL_min = (1-np.sqrt(1+d_max**2))/2
-    dL_max = 0
+    dL_min = (1+np.sqrt(1+d_max**2))/2
+    dL_max = (1-np.sqrt(1+d_max**2))/2
 
     dL_sols = find_pure_imag_crossings(mus, gs, t, dL_min, dL_max, num_scan_points=num_scan_points)
+
+    
     if verbose: print(f'\tdL solutions: {dL_sols} {np.shape(dL_sols)}')
 
     z_sols = []
 
-    if as_func_off=='delta':
-        for sol in dL_sols:
-            D = d**2 - sol*(sol+2)
-            z_sols.append( (-d*(sol+1) + np.sqrt(D)) / (N*(sol+2)) )
-            z_sols.append( (-d*(sol+1) - np.sqrt(D)) / (N*(sol+2)) )
+    for sol in dL_sols:
+        D = d**2 - sol*(sol+2)
+        z_sols.append( (-d*(sol+1) + np.sqrt(D)) / (N*(sol+2)) )
+        z_sols.append( (-d*(sol+1) - np.sqrt(D)) / (N*(sol+2)) )
 
-        z_sols = np.array(z_sols)
+    z_sols = np.array(z_sols)
+    if verbose: print(f'\tz solutions shape:{np.shape(z_sols)}')
 
-        thresholds = z_sols * ((N*z_sols + d)**2 + 1)
-
-    elif as_func_off=='delta_eff':
-        for sol in dL_sols:
-            z_sols.append(sol*(delta_effs**2+1) / (-2*N*delta_effs))
-            
-        z_sols = np.array(z_sols)
-
-        thresholds = z_sols * (delta_effs**2 + 1)
-
-    if verbose: print(f'\tz solutions shape:{np.shape(z_sols)}')    
+    thresholds = z_sols * ((N*z_sols + d)**2 + 1)
     if verbose: print(f'\tthresholds shape:{np.shape(thresholds)}')
     
-    filtered_thresholds = thresholds#filter_arrays(thresholds)
+    filtered_thresholds = filter_arrays(thresholds)
+    #print(thresholds, filtered_thresholds)
     if verbose: print(f'\tthresholds shape (after filtering):{np.shape(filtered_thresholds)}')
 
     alphas_sorted = sorted(filtered_thresholds, key=lambda a: np.min(a))
-
+    print(alphas_sorted)
     return alphas_sorted
 
 
@@ -165,58 +189,8 @@ def filter_arrays(arr_list):
 def z_star(N, a, d):
     roots = np.roots([N**2, 2*N*d, d**2 + 1, -a])
     roots = np.real(roots[np.isreal(roots)])
+    print(f'roots: {roots}')
     return roots
-
-def z_star_eff(a, d_eff):
-    return a / (d_eff**2 + 1)
-
-
-@njit
-def z_star_numba(N, a, d):
-    # 1. Divide by N^2 to get a monic cubic: x^3 + b*x^2 + c*x + d_val = 0
-    b = (2.0 * d) / N
-    c = (d**2 + 1.0) / (N**2)
-    d_val = -a / (N**2)
-    
-    # 2. Change variables (x = y - b/3) to get depressed cubic: y^3 + p*y + q = 0
-    p = c - (b**2) / 3.0
-    q = (2.0 * b**3) / 27.0 - (b * c) / 3.0 + d_val
-    
-    # 3. Calculate the discriminant
-    discriminant = (q / 2.0)**2 + (p / 3.0)**3
-    shift = b / 3.0
-    
-    if discriminant > 0:
-        # One real root, two complex roots
-        sqrt_disc = np.sqrt(discriminant)
-        u = np.cbrt(-q / 2.0 + sqrt_disc)
-        v = np.cbrt(-q / 2.0 - sqrt_disc)
-        
-        # Return the single real root
-        return np.array([u + v - shift])
-        
-    elif discriminant == 0:
-        # All roots are real, and at least two are equal
-        if p == 0 and q == 0:
-            return np.array([-shift])
-        
-        root1 = 3.0 * q / p - shift
-        root2 = -1.5 * q / p - shift
-        # Return unique real roots
-        if abs(root1 - root2) < 1e-12:
-            return np.array([root1])
-        return np.array([root1, root2])
-        
-    else:
-        # discriminant < 0: Three distinct real roots (Trigonometric solution)
-        r = np.sqrt(-(p**3) / 27.0)
-        phi = np.arccos(-q / (2.0 * r))
-        
-        root1 = 2.0 * np.cbrt(r) * np.cos(phi / 3.0) - shift
-        root2 = 2.0 * np.cbrt(r) * np.cos((phi + 2.0 * np.pi) / 3.0) - shift
-        root3 = 2.0 * np.cbrt(r) * np.cos((phi + 4.0 * np.pi) / 3.0) - shift
-        
-        return np.array([root1, root2, root3])
 
 
 def dL_star(N, z, d):
@@ -226,7 +200,7 @@ def dL_star(N, z, d):
 # -----------------------------
 # Jacobian
 # -----------------------------
-def construct_J0(mu_vals, gamma_vals, tau):
+def construct_J0(mu_vals, gamma_vals, tau, symbolic=True):
     """
     Construct J0:
     
@@ -247,8 +221,13 @@ def construct_J0(mu_vals, gamma_vals, tau):
 
     N = len(mu_vals)
 
-    mu_vals = np.asarray(mu_vals, dtype=float)
-    gamma_vals = np.asarray(gamma_vals, dtype=float)
+    if symbolic:
+        mu_vals = list(map(sp.sympify, mu_vals))
+        gamma_vals = list(map(sp.sympify, gamma_vals))
+        tau = sp.sympify(tau)
+    else:
+        mu_vals = np.asarray(mu_vals, dtype=float)
+        gamma_vals = np.asarray(gamma_vals, dtype=float)
 
     # ------------------------------------------------------------
     # Derived quantities
@@ -269,7 +248,10 @@ def construct_J0(mu_vals, gamma_vals, tau):
 
     dim = 2*N + 1
 
-    J0 = np.zeros((dim, dim))
+    if symbolic:
+        J0 = sp.zeros(dim, dim)
+    else:
+        J0 = np.zeros((dim, dim))
 
     z_idx = dim - 1
 
@@ -344,6 +326,111 @@ def construct_J0(mu_vals, gamma_vals, tau):
     return J0
 
 
+def clear_denominators(expr, x):
+    # combine all rational terms into single fraction
+    expr = sp.together(expr)
+
+    # optionally simplify cancellations
+    expr = sp.cancel(expr)
+
+    # split numerator / denominator
+    num, den = sp.fraction(expr)
+
+    # return polynomial numerator (if valid)
+    num = sp.expand(num)
+    den = sp.expand(den)
+
+    # enforce polynomial in x
+    num = sp.Poly(num, x).as_expr()
+
+    return num, den
+
+
+def derive_threshold_polynomials(mu_vals, gamma_vals, tau):
+    """
+    Derive the omega^2 polynomial equation:
+    
+        g_Re*h_Im + g_Im*h_Re = 0
+    
+    and solve for omega^2.
+    """
+
+    lam = sp.symbols('lam')
+    omega = sp.symbols('omega', real=True)
+    x = sp.symbols('x', real=True)
+
+    J0 = construct_J0(mu_vals, gamma_vals, tau, symbolic=True)
+    J0 = np.array(J0, dtype=float)
+    J0 = sp.Matrix(J0)
+    dim = J0.shape[0]
+
+    M = J0 - lam * sp.eye(dim)
+    print(M)
+    B = M.copy()
+    B.row_del(dim-1)
+    B.col_del(0)
+    print(B)
+    # IMPORTANT: keep charpoly ONLY in lam
+    print('M:', sp.expand(M.det().as_expr()))
+    print('B:', sp.expand(B.det().as_expr()))
+    p, q = clear_denominators(sp.expand(M.det().as_expr()), lam)
+    s, t = clear_denominators(sp.expand(B.det().as_expr()), lam)
+    print(f'p:{p}')
+    print(f'q:{q}')
+    print(f's:{s}')
+    print(f't:{t}')
+
+    g_lam = p*t
+    h_lam = s*q
+
+    # expand BEFORE substitution
+    g_lam = sp.expand(g_lam)
+    h_lam = sp.expand(h_lam)
+
+    # substitute AFTER expansion (critical fix)
+    g = g_lam.xreplace({lam: sp.I * omega})
+    h = h_lam.xreplace({lam: sp.I * omega})
+    g = sp.expand(sp.N(g))
+    h = sp.expand(sp.N(h))
+
+    # real/imag split
+    g_re, g_im = sp.re(g), sp.im(g)
+    h_re, h_im = sp.re(h), sp.im(h)
+
+    g_im = sp.cancel(g_im / omega)
+    h_im = sp.cancel(h_im / omega)
+
+    # omega^2 substitution
+    subs = {omega**2: x}
+
+    g_re = sp.expand(g_re.subs(subs))
+    g_im = sp.expand(g_im.subs(subs))
+    h_re = sp.expand(h_re.subs(subs))
+    h_im = sp.expand(h_im.subs(subs))
+
+    print(f'gre: {g_re}')
+    print(f'gim: {g_im}')
+    print(f'hre: {h_re}')
+    print(f'him: {h_im}')
+
+    expr = sp.expand(g_re * h_im - g_im * h_re)
+
+    poly = sp.Poly(expr, x)
+
+    coeffs = np.array([complex(sp.N(c)) for c in poly.all_coeffs()], dtype=complex)/1e6
+    print(coeffs)
+    x_solutions = np.roots(coeffs)
+    print('XSOLS:', x_solutions)
+
+    return {
+        "g_Re(x)": np.array(sp.poly(g_re).all_coeffs(), dtype=float),
+        "g_Im(x)": np.array(sp.poly(g_im).all_coeffs(), dtype=float),
+        "h_Re(x)": np.array(sp.poly(h_re).all_coeffs(), dtype=float),
+        "h_Im(x)": np.array(sp.poly(h_im).all_coeffs(), dtype=float),
+        "threshold_polynomial": np.array(sp.poly(expr).all_coeffs(), dtype=float),
+        "omega2_solutions": np.array(x_solutions, dtype=complex),
+    }
+
 
 def extract_real_entries(arr, epsilon=1e-5):
     """
@@ -358,7 +445,7 @@ def extract_real_entries(arr, epsilon=1e-5):
 
 
 def Jacobian(N, z, d, t, mus, gs):
-    J0 = construct_J0(mus, gs, t)
+    J0 = construct_J0(mus, gs, t, symbolic=False)
 
     dL = dL_star(N, z, d)
     J = J0.copy()
@@ -377,13 +464,13 @@ def compute_eigs(N, mus, a, d, t, gs):
         vals, vecs = np.linalg.eig(Jacobian(N, root, d, t, mus, gs))
         eigvals.append(vals)
         eigvecs.append(vecs)
-        if verbose: print(f'\troot {i}')
+        print(f'\troot {i}')
         if verbose:
             for j, (val, vec) in enumerate(zip(vals, vecs)):
                 print(f'\t\tvalue {j}:{val}')
                 print(f'\t\tvector {j}:{vec}')
 
-    return np.array(roots), np.array(eigvals), np.array(eigvecs)
+    return roots, eigvals, eigvecs
 
 
 
@@ -401,31 +488,6 @@ def system(time, X, a, d, mus, gs, t):
         dX[2*i+1] = -1*gs[i]*y_i - mus[i]*x_i + mus[i]*z
     dX[-1] = a / ((np.sum(x)+d)**2+1)/t - z/t
     return dX
-
-
-@njit
-def system_core(X, a, d, mus, gs, t, out):
-    N = (len(X)-1)//2
-
-    x = X[0:2*N:2]
-    y = X[1:2*N:2]
-    z = X[-1]
-
-    for i in range(N):
-        out[2*i] = y[i]
-        out[2*i+1] = -gs[i]*y[i] - mus[i]*x[i] + mus[i]*z
-
-    s = 0.0
-    for i in range(N):
-        s += x[i]
-
-    out[-1] = a / ((s + d)*(s + d) + 1)/t - z/t
-
-
-def system_numba(t, X, a, d, mus, gs, tau):
-    out = np.zeros_like(X)
-    system_core(X, a, d, mus, gs, tau, out)
-    return out
 
 
 
@@ -449,110 +511,6 @@ def project_onto_plane(x, v1, v2):
     return projection
 
 
-def project_onto_line(x, v):
-    """
-    Project vector x onto the line spanned by vector v.
-
-    Parameters
-    ----------
-    x : array-like
-        Vector to be projected
-    v : array-like
-        Direction vector of the line
-
-    Returns
-    -------
-    numpy.ndarray
-        Projection of x onto span(v)
-    """
-    x = np.asarray(x)
-    v = np.asarray(v)
-
-    return (np.dot(x, v) / np.dot(v, v)) * v
-
-
-def transform_matrix(N):
-    """
-    Construct the (2N+1)x(2N+1) transformation matrix for
-
-    (x1,y1,...,xN,yN,z) -> (X,Y,u2,v2,...,uN,vN,z)
-
-    where
-        X = (1/N) sum_i x_i
-        Y = (1/N) sum_i y_i
-        u_i = x_i - X
-        v_i = y_i - Y
-    """
-    M = np.zeros((2*N + 1, 2*N + 1))
-
-    # Row for X
-    for i in range(N):
-        M[0, 2*i] = 1
-
-    # Row for Y
-    for i in range(N):
-        M[1, 2*i + 1] = 1
-
-    # Rows for u_i, v_i (i = 2,...,N)
-    for i in range(1, N):   # zero-based: i=1 corresponds to u2,v2
-        row_u = 2*i
-        row_v = 2*i + 1
-
-        # u_i = x_i - X = x_i - (1/N) sum_j x_j
-        for j in range(N):
-            M[row_u, 2*j] = -1
-        M[row_u, 2*i] = N - 1
-
-        # v_i = y_i - Y = y_i - (1/N) sum_j y_j
-        for j in range(N):
-            M[row_v, 2*j + 1] = -1
-        M[row_v, 2*i + 1] = N - 1
-
-    # z unchanged
-    M[-1, -1] = N
-
-    return M / N
-
-
-def inverse_transform_matrix(N):
-    """
-    Construct the inverse transformation matrix for
-
-    (X,Y,u2,v2,...,uN,vN,z) -> (x1,y1,...,xN,yN,z)
-
-    Returns a (2N+1)x(2N+1) matrix.
-    """
-    M = np.zeros((2*N + 1, 2*N + 1))
-
-    # x1 = X - sum_{i=2}^N u_i
-    M[0, 0] = 1
-    for i in range(1, N):
-        M[0, 2*i] = -1
-
-    # y1 = Y - sum_{i=2}^N v_i
-    M[1, 1] = 1
-    for i in range(1, N):
-        M[1, 2*i + 1] = -1
-
-    # xi = X + ui, yi = Y + vi  for i=2,...,N
-    for i in range(1, N):
-        row_x = 2*i
-        row_y = 2*i + 1
-
-        M[row_x, 0] = 1          # X contribution
-        M[row_x, 2*i] = 1        # ui contribution
-
-        M[row_y, 1] = 1          # Y contribution
-        M[row_y, 2*i + 1] = 1    # vi contribution
-
-    # z unchanged
-    M[-1, -1] = 1
-
-    return M
-            
-
-
-
 
 if __name__ == '__main__':
     N = 2
@@ -562,3 +520,18 @@ if __name__ == '__main__':
     t = 2
     d = 1
     z = z_star(N, a, d)[0]
+    # symbolic
+    J0_sym = construct_J0(mus, gs, t, symbolic=True)
+
+    # numeric numpy array
+    J0_np = construct_J0(mus, gs, t, symbolic=False)
+
+    print(type(J0_sym), J0_sym)
+    print(type(J0_np), J0_np)
+
+    result = derive_threshold_polynomials(
+        mus,
+        gs,
+        t
+    )
+    print(result)
