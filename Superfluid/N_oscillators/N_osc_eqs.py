@@ -104,6 +104,9 @@ def lasing_threshold(N, d, t, mus, gs, num_scan_points=250, as_func_off='delta',
     dL_sols = find_pure_imag_crossings(mus, gs, t, dL_min, dL_max, num_scan_points=num_scan_points)
     if verbose: print(f'\tdL solutions: {dL_sols} {np.shape(dL_sols)}')
 
+    if len(dL_sols) == 0:
+        return []
+
     z_sols = []
 
     if as_func_off=='delta':
@@ -114,6 +117,9 @@ def lasing_threshold(N, d, t, mus, gs, num_scan_points=250, as_func_off='delta',
 
         z_sols = np.array(z_sols)
 
+        if len(z_sols) == 0:
+            return []
+
         thresholds = z_sols * ((N*z_sols + d)**2 + 1)
 
     elif as_func_off=='delta_eff':
@@ -122,17 +128,22 @@ def lasing_threshold(N, d, t, mus, gs, num_scan_points=250, as_func_off='delta',
             
         z_sols = np.array(z_sols)
 
+        if len(z_sols) == 0:
+            return []
+
         thresholds = z_sols * (delta_effs**2 + 1)
 
     if verbose: print(f'\tz solutions shape:{np.shape(z_sols)}')    
     if verbose: print(f'\tthresholds shape:{np.shape(thresholds)}')
     
-    filtered_thresholds = thresholds#filter_arrays(thresholds)
-    if verbose: print(f'\tthresholds shape (after filtering):{np.shape(filtered_thresholds)}')
+    thresholds_filtered = thresholds#filter_arrays(thresholds)
+    if verbose: print(f'\tthresholds shape (after filtering):{np.shape(thresholds_filtered)}')
+    if len(thresholds_filtered) == 0:
+        return []
 
-    alphas_sorted = sorted(filtered_thresholds, key=lambda a: np.min(a))
+    thresholds_sorted = sorted(thresholds_filtered, key=lambda a: np.min(a))
 
-    return alphas_sorted
+    return thresholds_sorted
 
 
 def filter_arrays(arr_list):

@@ -40,7 +40,7 @@ Z = np.zeros((N_delta, N_alpha))
 D_eff, A = np.meshgrid(deltas_eff, alphas, indexing='ij')
 Z_eff = np.zeros((N_delta, N_alpha))
 
-N_min, N_max = 2, 25
+N_min, N_max = 2, 20
 
 # ============================================================
 # INITIAL PARAMETERS
@@ -66,7 +66,7 @@ z0 = 0.0
 fig = plt.figure(figsize=(16, 10))
 fig.subplots_adjust(bottom=0.32)
 
-gs = GridSpec(2, 3, hspace=0.4, wspace=0.3)
+gs = GridSpec(2, 4, hspace=0.4, wspace=0.3)
 
 ax1 = fig.add_subplot(gs[0, 0])  # bifurcation
 ax2 = fig.add_subplot(gs[1, 0])  # eigenvalues
@@ -74,6 +74,8 @@ ax3 = fig.add_subplot(gs[0, 1])  # time trace
 ax4 = fig.add_subplot(gs[1, 1])  # threshold panel
 ax5 = fig.add_subplot(gs[0, 2])
 ax6 = fig.add_subplot(gs[1, 2])
+ax7 = fig.add_subplot(gs[0, 3])
+ax8 = fig.add_subplot(gs[1, 3])
 
 # ============================================================
 # ============================================================
@@ -146,17 +148,37 @@ ax3.set_xlabel(r'$t$')
 ax3.set_ylabel(r'$NX$')
 
 # ============================================================
+# 4. TIME TRACE PANEL (ax3)
+# ============================================================
+traj2, = ax7.plot([], [], 'k')
+offsets2 = [ax7.axhline(y=0, color=c) for c in ['r', 'g', 'b']]
+
+ax7.set_title("(X, t)")
+ax7.set_xlabel(r'$t$')
+ax7.set_ylabel(r'$NX$')
+
+# ============================================================
+# 4. TIME TRACE PANEL (ax3)
+# ============================================================
+
+fourier, = ax8.plot([], [], 'k')
+
+ax8.set_title("fourier")
+ax8.set_xlabel(r'$freq$')
+ax8.set_ylabel(r'$amp$')
+
+# ============================================================
 # 4. MANIFOLDS
 # ============================================================
 
-real_img = ax5.imshow(
+xbasis = ax5.imshow(
     np.zeros((N0+1, N0+2)),
     aspect='auto',
     origin='lower',
     cmap='viridis'
 )
 
-imag_img = ax6.imshow(
+xprimebasis = ax6.imshow(
     np.zeros((2*N0+1, N0+2)),
     aspect='auto',
     origin='lower',
@@ -256,6 +278,7 @@ def update(val, update_cmap=False, update_cmap_eff=True, update_solver=False, up
     # SYSTEM PARAMETERS
     # --------------------------------------------------------
     mus = mu_spectrum(N)
+    print(mus, np.sqrt(mus))
     gammas = np.full(N, gamma)
     
 
@@ -285,27 +308,33 @@ def update(val, update_cmap=False, update_cmap_eff=True, update_solver=False, up
     if update_thresholds:
         thresholds = lasing_threshold(N, deltas, tau, mus, gammas)
 
-        for i, line in enumerate(lasing_lines):
-            if i < len(thresholds):
-                line.set_data(deltas, thresholds[i])
-            else:
+        if len(thresholds) != 0:
+            for i, line in enumerate(lasing_lines):
+                if i < len(thresholds):
+                    line.set_data(deltas, thresholds[i])
+                else:
+                    line.set_data([], [])
+
+            bif_lower.set_data(deltas, lower_boundary(N, deltas))
+            bif_upper.set_data(deltas, upper_boundary(N, deltas))
+            bif_lower.set_zorder(10)
+            bif_upper.set_zorder(10)
+
+
+            thresholds_eff = lasing_threshold(N, deltas, tau, mus, gammas,
+                                            as_func_off='delta_eff',
+                                            delta_effs=deltas_eff)
+
+            for i, line in enumerate(lasing_lines_eff):
+                if i < len(thresholds_eff):
+                    line.set_data(np.linspace(0, delta_max, N_delta), thresholds_eff[i])
+                else:
+                    line.set_data([], [])
+        
+        else:
+            for line, line_eff in zip(lasing_lines, lasing_lines_eff):
                 line.set_data([], [])
-
-        bif_lower.set_data(deltas, lower_boundary(N, deltas))
-        bif_upper.set_data(deltas, upper_boundary(N, deltas))
-        bif_lower.set_zorder(10)
-        bif_upper.set_zorder(10)
-
-
-        thresholds_eff = lasing_threshold(N, deltas, tau, mus, gammas,
-                                          as_func_off='delta_eff',
-                                          delta_effs=deltas_eff)
-
-        for i, line in enumerate(lasing_lines_eff):
-            if i < len(thresholds_eff):
-                line.set_data(np.linspace(0, delta_max, N_delta), thresholds_eff[i])
-            else:
-                line.set_data([], [])
+                line_eff.set_data([], [])
 
     delta_temp = deltas_eff - N*np.max(z_star(N, alpha, delta))
     bif_lower_eff.set_data(deltas_eff, lower_boundary(N, delta_temp))
@@ -333,7 +362,7 @@ def update(val, update_cmap=False, update_cmap_eff=True, update_solver=False, up
 
     for i, (root, vals, vecs, scat) in enumerate(zip(roots, eigvals, eigvecs, scatters)):
         scat.set_offsets(np.c_[vals.real, vals.imag])
-        print(np.c_[vals.real, vals.imag])
+
         # remove all negative imaginary eigenvalues
         mask = vals.imag >= -1e-8
 
@@ -349,54 +378,50 @@ def update(val, update_cmap=False, update_cmap_eff=True, update_solver=False, up
         vals = vals[idx]
         vecs = vecs[:, idx]
 
-        real_matrix = np.zeros((len(vals), N+2))
-        imag_matrix = np.zeros((len(vals), N+2))
+        xbasis_matrix = np.zeros((len(vals), N+1))
+        xprimebasis_matrix = np.zeros((len(vals), N+1))
+
+        x_idx = np.arange(0, 2*(N+1), 2)
+
+        Tinv = inverse_transform_matrix(N)   # compute once outside loop
 
         for k in range(len(vals)):
 
-            vec = inverse_transform_matrix(N) @ vecs[:, k]
+            # Both basis representations
+            vectors = [
+                Tinv @ vecs[:, k],
+                vecs[:, k]
+            ]
 
-            row = np.zeros(N)
+            for matrix, vec in zip([xbasis_matrix, xprimebasis_matrix], vectors):
 
-            if np.abs(np.imag(vals[k])) > 1e-10:
-                for i in range(N):
-                    e = np.zeros(2*N+1)
-                    e[2*i] = 1
+                if np.abs(np.imag(vals[k])) > 1e-10:
+                    # 2D eigenspace
+                    basis = np.column_stack((np.real(vec), np.imag(vec)))
 
-                    row[i] = np.linalg.norm(project_onto_plane(e, np.real(vec), np.imag(vec)))
+                    # Orthonormalize
+                    Q, _ = np.linalg.qr(basis)
 
-                e = np.zeros(2*N+1)
-                e[0:-1:2] = 1
+                    # Projection norm of e_i onto plane
+                    row = np.sqrt(Q[x_idx, 0]**2 + Q[x_idx, 1]**2)
 
-                X_comp = np.linalg.norm(project_onto_plane(e, np.real(vec), np.imag(vec)))
-            else:
-                e = np.zeros(2*N+1)
-                e[-1] = 1
+                else:
+                    # 1D eigenspace
+                    u = np.real(vec)
+                    u /= np.linalg.norm(u)
 
-                z_comp = np.linalg.norm(project_onto_line(e, np.real(vec)))
-                
-                e = np.zeros(2*N+1)
-                e[0:-1:2] = 1
+                    # Projection norm of e_i onto line
+                    row = np.abs(u[x_idx])
 
-                X_comp = np.linalg.norm(project_onto_line(e, np.real(vec)))
-            
+                matrix[k, :] = row
 
-            row = np.concatenate([row, [z_comp, X_comp]])
 
-            real_matrix[k, :] = row
-            imag_matrix[k, :] = row
+        xbasis.set_data(xbasis_matrix)
+        xbasis.set_extent((-.5, N + .5, -.5, N + .5))
+        xbasis.set_clim(vmin=xbasis_matrix.min(), vmax=xbasis_matrix.max())
 
-        real_img.set_data(real_matrix)
-        imag_img.set_data(imag_matrix)
-
-        real_img.set_clim(-1, 1)
-        imag_img.set_clim(-1, 1)
-
-        print(np.sum(real_matrix, axis=0), np.sum(real_matrix, axis=1))
-
-        real_img.set_extent((-0.5, N + 1.5, -0.5, N + 0.5))
         ax5.set_yticks(np.arange(N + 1))
-        ax5.set_xticks(np.arange(N + 2))
+        ax5.set_xticks(np.arange(N + 1))
 
         y_labels = []
         for i in range(N + 1):
@@ -411,22 +436,29 @@ def update(val, update_cmap=False, update_cmap_eff=True, update_solver=False, up
             for digit in list(str(i)):
                 label += rf'$_{digit}$'
             x_labels.append(label)
-        x_labels += [r'$X$', r'$z$']
-
+        x_labels += [r'$z$']
 
         ax5.set_yticklabels(y_labels)
         ax5.set_xticklabels(x_labels, rotation=45, ha='right')
 
-        real_img.set_clim(vmin=real_matrix.min(), vmax=real_matrix.max())
 
+        xprimebasis.set_data(xprimebasis_matrix)
+        xprimebasis.set_extent((-.5, N + .5, -.5, N + .5))
+        xprimebasis.set_clim(vmin=xprimebasis_matrix.min(), vmax=xprimebasis_matrix.max())
 
-        row_labels = [
-            f"{np.imag(ev):.2f}i"
-            for ev in vals
-        ]
+        ax6.set_yticks(np.arange(N + 1))
+        ax6.set_xticks(np.arange(N + 1))
 
-        ax6.set_yticks(range(len(vals)))
-        ax6.set_yticklabels(row_labels)
+        x_labels = [r'$X$']
+        for i in range(2, N + 1):
+            label = r'$u$'
+            for digit in list(str(i)):
+                label += rf'$_{digit}$'
+            x_labels.append(label)
+        x_labels += [r'$z$']
+
+        ax6.set_yticklabels(y_labels)
+        ax6.set_xticklabels(x_labels, rotation=45, ha='right')
 
     # --------------------------------------------------------
     # TIME EVOLUTION
@@ -449,6 +481,41 @@ def update(val, update_cmap=False, update_cmap_eff=True, update_solver=False, up
 
         ax3.relim()
         ax3.autoscale_view()
+
+
+        t_eval = np.linspace(0, 50, 5000)
+
+        sol = solve_ivp(
+            lambda t, X: system_numba(t, X, alpha, delta, mus, gammas, tau),
+            (0, 50), sol.y[:,-1], t_eval=t_eval
+        )
+
+        X = np.sum(sol.y[:-1:2, :], axis=0)
+
+        traj2.set_data(t_eval, X)
+        #roots_sorted = np.sort(z_star_numba(N, alpha, delta))[::-1]
+        #for offset, root in zip(offsets, roots_sorted):
+        #    offset.set_ydata([N * root])
+
+        ax7.relim()
+        ax7.autoscale_view()
+
+
+        fft_values = np.fft.rfft(X-np.mean(X))
+        frequencies = np.fft.rfftfreq(len(X), d=50/5000)
+
+        amplitude = 2.0 * np.abs(fft_values) / len(X)
+        amplitude[0] /= 2.0
+        if len(X) % 2 == 0:
+            amplitude[-1] /= 2.0
+
+        fourier.set_data(frequencies, amplitude)
+
+        ax8.set_xlim(0, 3)
+        ax8.set_ylim(0, 3)
+        
+
+
 
     mesh.set_visible(check.get_status()[0])
     cbar.ax.set_visible(check.get_status()[0])
