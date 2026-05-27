@@ -40,7 +40,7 @@ Z = np.zeros((N_delta, N_alpha))
 D_eff, A = np.meshgrid(deltas_eff, alphas, indexing='ij')
 Z_eff = np.zeros((N_delta, N_alpha))
 
-N_min, N_max = 2, 20
+N_min, N_max = 1, 20
 
 # ============================================================
 # INITIAL PARAMETERS
@@ -162,6 +162,7 @@ ax7.set_ylabel(r'$NX$')
 # ============================================================
 
 fourier, = ax8.plot([], [], 'k')
+spectrum = ax8.vlines([], ymin=0, ymax=1, color='grey', alpha=0.5)
 
 ax8.set_title("fourier")
 ax8.set_xlabel(r'$freq$')
@@ -278,7 +279,7 @@ def update(val, update_cmap=False, update_cmap_eff=True, update_solver=False, up
     # SYSTEM PARAMETERS
     # --------------------------------------------------------
     mus = mu_spectrum(N)
-    print(mus, np.sqrt(mus))
+
     gammas = np.full(N, gamma)
     
 
@@ -468,7 +469,7 @@ def update(val, update_cmap=False, update_cmap_eff=True, update_solver=False, up
         t_eval = np.linspace(0, T, 5000)
 
         sol = solve_ivp(
-            lambda t, X: system_numba(t, X, alpha, delta, mus, gammas, tau),
+            lambda t, X: system(t, X, alpha, delta, mus, gammas, tau),
             (0, T), y0, t_eval=t_eval
         )
 
@@ -483,11 +484,11 @@ def update(val, update_cmap=False, update_cmap_eff=True, update_solver=False, up
         ax3.autoscale_view()
 
 
-        t_eval = np.linspace(0, 50, 5000)
+        t_eval = np.linspace(T, T+200, 5000)
 
         sol = solve_ivp(
-            lambda t, X: system_numba(t, X, alpha, delta, mus, gammas, tau),
-            (0, 50), sol.y[:,-1], t_eval=t_eval
+            lambda t, X: system(t, X, alpha, delta, mus, gammas, tau),
+            (T, T+200), sol.y[:,-1], t_eval=t_eval
         )
 
         X = np.sum(sol.y[:-1:2, :], axis=0)
@@ -496,23 +497,26 @@ def update(val, update_cmap=False, update_cmap_eff=True, update_solver=False, up
         #roots_sorted = np.sort(z_star_numba(N, alpha, delta))[::-1]
         #for offset, root in zip(offsets, roots_sorted):
         #    offset.set_ydata([N * root])
-
-        ax7.relim()
-        ax7.autoscale_view()
+        
+        ax7.set_xlim(T,T+20)
+        ax7.set_ylim(np.min(X), np.max(X))
+        
 
 
         fft_values = np.fft.rfft(X-np.mean(X))
-        frequencies = np.fft.rfftfreq(len(X), d=50/5000)
+        frequencies = np.fft.rfftfreq(len(X), d=200/5000)
 
         amplitude = 2.0 * np.abs(fft_values) / len(X)
         amplitude[0] /= 2.0
         if len(X) % 2 == 0:
             amplitude[-1] /= 2.0
 
-        fourier.set_data(frequencies, amplitude)
+        fourier.set_data(frequencies*2*np.pi, amplitude)
+        segments = [[[x, 0], [x, np.max(amplitude)]] for x in np.sqrt(mus)]
+        spectrum.set_segments(segments)
 
-        ax8.set_xlim(0, 3)
-        ax8.set_ylim(0, 3)
+        ax8.set_xlim(0, np.max(np.sqrt(mus))+np.mean(np.diff(np.sqrt(mus))))
+        ax8.set_ylim(0, np.max(amplitude))
         
 
 
