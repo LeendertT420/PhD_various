@@ -4,7 +4,7 @@ from numba import njit
 import multiprocessing as mp
 from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
-from equations import mu_spectrum, lasing_threshold
+from equations import *
 
 # =====================================================================
 # 1. OPTIMIZED PHYSICS ENGINE (Symmetry + Machine Code Compilation)
@@ -79,7 +79,10 @@ def _parallel_worker(task_args):
             "above_threshold": False,
             "exploded": False,
             "final_single_state": u0, # Pass along incoming hot-start unaltered
-            "raw_tail": np.full((expected_vars, expected_steps), np.nan) # Clean NaN array block
+            "raw_tail": np.full((expected_vars, expected_steps), np.nan), # Clean NaN array block
+            "roots": None,
+            "eigvals": None,
+            "eigvecs": None
         }
     
     sys = OscillatorSystem(**sys_params)
@@ -94,7 +97,9 @@ def _parallel_worker(task_args):
         max_step=0.1,
         t_eval=t_eval
     )
-    
+
+    roots, vals, vecs = compute_eigs(sys_params)
+
     # Expected target dimensions for the output array tensor
     expected_vars = 2 * sys.N + 1
     expected_steps = len(t_eval)
@@ -129,7 +134,10 @@ def _parallel_worker(task_args):
         'above_threshold': True,
         "exploded": exploded,
         "final_single_state": final_single_state,
-        "raw_tail": raw_tail
+        "raw_tail": raw_tail,
+        "roots": roots,
+        "eigvals": vals,
+        "eigvecs": vecs
     }
 
 
@@ -170,7 +178,10 @@ class LayeredParallelSmartSweeper:
             # Build the parallel tasks batch for the current 2D plane slice
             for i, v2 in enumerate(p2_vals):
                 
-                alpha_threshold = lthreshold[i]
+                if lthreshold is not None:
+                    alpha_threshold = lthreshold[i]
+                else:
+                    alpha_threshold = 0
 
                 for v3 in p3_vals:
                     current_coords = (v1, v2, v3)
@@ -210,7 +221,7 @@ class LayeredParallelSmartSweeper:
 # 3. PIPELINE EXECUTION ENGINE
 # =====================================================================
 if __name__ == "__main__":
-    N = 5
+    N = 3
 
     # Correct 3D array index parsing logic
     chi_data = np.load('./chi_ijk.npy')[:N, :N, :N]
@@ -225,7 +236,6 @@ if __name__ == "__main__":
         "sigma": 20.0,
         "chi": chi_data
     }
-    
     default_u0 = np.concatenate([
         np.random.uniform(-0.5, 0.5, N), 
         np.zeros(N),                     
@@ -233,45 +243,57 @@ if __name__ == "__main__":
     ])
     
     t_span = (0.0, 1000.0)
-    Dt_eval = 5 / np.sqrt(base_config['mu'][0]) # span ensures 5 oscillations of the heaviest (slowest) oscillator
+    Dt_eval = 2*np.pi*5 / np.sqrt(base_config['mu'][0]) # span ensures 5 oscillations of the heaviest (slowest) oscillator
     t_span_eval = (t_span[1]-Dt_eval, t_span[1]) # evaluate on the last part of the simulation
-    t_res_eval = 1 / np.sqrt(base_config['mu'][-1]) / 10 # resolution ensures 10 points per oscillation for the lightest (fastest) oscillator
+    t_res_eval = 2*np.pi / (np.sqrt(base_config['mu'][-1]) * 20) # resolution ensures 10 points per oscillation for the lightest (fastest) oscillator
+
     
     # Instantiate Sweeper
     sweeper = LayeredParallelSmartSweeper(base_config, t_span, default_u0, t_span_eval, t_res_eval=t_res_eval)
     
     # Define parameters vectors grid resolution
-    alphas = np.linspace(0.1, 1.1, 5)
-    sigmas = np.array([30, 40, 50])
     deltas = np.linspace(-1, 1, 5)
-
-    lthreshold = lasing_threshold(base_config, deltas=deltas)
+    lthreshold = np.array(lasing_threshold(base_config, deltas=deltas))
+    alphas = np.linspace(0.9*np.min(lthreshold), 2, 5)
+    sigmas = np.array([30, 40, 50])
+    
     
     # Execute the Pipeline
     sweep_data = sweeper.run_layered_parallel_sweep(
         p1_name="alpha", p1_vals=alphas,
         p2_name="delta", p2_vals=deltas,
-        p3_name="sigma", p3_vals=sigmas,
-        lthreshold=lthreshold # if lthreshold is given, p1 should be alpha and p2 should be delta
+        p3_name="sigma", p3_vals=sigmas # if lthreshold is given, p1 should be alpha and p2 should be delta
     )
     
     # Map the compiled records to a highly accessible 5-dimensional NumPy Array Data Block
-    print("\nCompiling state tensor...")
-    state_tensor = np.zeros((len(alphas), len(deltas), len(sigmas), 2 * N + 1, int(abs(t_span_eval[1] - t_span_eval[0])/t_res_eval)))
+    print("\nWriting data...")
+    dim = 2 * N + 1
+    state_tensor = np.zeros((len(alphas), len(deltas), len(sigmas), dim, int(abs(t_span_eval[1] - t_span_eval[0])/t_res_eval)))
+    roots_tensor = np.full((len(alphas), len(deltas), len(sigmas), 3, dim), np.nan)
+    eigvals_tensor = np.full((len(alphas), len(deltas), len(sigmas), 3, dim), np.nan, dtype=complex)
+    eigvecs_tensor = np.full((len(alphas), len(deltas), len(sigmas), 3, dim, dim), np.nan, dtype=complex)
+
     
     idx = 0
-    for i in range(len(alphas)):
+    for i in tqdm(range(len(alphas))):
         for j in range(len(deltas)):
             for k in range(len(sigmas)):
-                state_tensor[i, j, k, :, :] = sweep_data[idx]["raw_tail"]
+                res = sweep_data[idx]
+                state_tensor[i, j, k, :, :] = res["raw_tail"]
+
+                if res["above_threshold"] and not res["exploded"] and len(res["roots"]) > 0:
+                    num_found = len(res["roots"])
+                    
+                    # Assign the found data up to the actual count; remaining slots stay NaN
+                    roots_tensor[i, j, k, :num_found, :] = res["roots"]
+                    eigvals_tensor[i, j, k, :num_found, :] = res["eigvals"]
+                    eigvecs_tensor[i, j, k, :num_found, :, :] = res["eigvecs"]
+
                 idx += 1
 
     # Save to disk
-    np.savez_compressed(
-        'sweep_results.npz', 
-        alphas=alphas, 
-        deltas=deltas, 
-        sigmas=sigmas, 
-        states=state_tensor
-    )
+    np.savez_compressed(f'sweep_results_N={N}.npz', 
+                        alphas=alphas, deltas=deltas, sigmas=sigmas, states=state_tensor,
+                        roots=roots_tensor, eigvals=eigvals_tensor, eigvecs=eigvecs_tensor)
+    
     print("Successfully saved simulation outputs to sweep_results.npz!")

@@ -76,7 +76,11 @@ def fixed_points_num(params, num_tries=30):
         x_val = vars_xz[0:N]
         z_val = vars_xz[-1]
         U = np.concatenate([x_val, np.zeros(N), [z_val]])
-        derivs = system(0, U, params)
+        derivs = ode_vector_field(0, U, N,
+                                  params['gamma'], params['mu'],
+                                  params['tau'], params['alpha'],
+                                  params['delta'], params['sigma'],
+                                  params['chi'])
         return np.concatenate([derivs[N:2*N], [derivs[-1]]])
 
     valid_solutions = []
@@ -90,8 +94,8 @@ def fixed_points_num(params, num_tries=30):
             sol_x = res.x[0:N]
             sol_z = res.x[-1]
             
-            if np.all(sol_x >= 0) and np.all(sol_x < 10*sigma):
-                if (sol_z >= 0) and (sol_z < 10*sigma):
+            if np.all(sol_x >= 0) and np.all(sol_x < 2*sigma):
+                if (sol_z >= 0) and (sol_z < 2*sigma):
                     full_fixed_point = np.concatenate([sol_x, np.zeros(N), [sol_z]])
                     
                     if not any(np.allclose(full_fixed_point, sol, atol=1e-8) for sol in valid_solutions):
@@ -330,11 +334,12 @@ def find_pure_imag_crossings(params, dL_min, dL_max, num_scan_points=250):
 
 def lasing_threshold(params, deltas=None, num_scan_points=250, as_func_off='delta', delta_effs=None):
     N = params['N']
-    d = params['delta']
 
     if isinstance(deltas, (np.ndarray, list)):
         d_max = np.max(np.abs([deltas[0], deltas[-1]]))
+        d = deltas
     else:
+        d = params['delta']
         d_max = d
 
     dL_min = (1-np.sqrt(1+d_max**2))/2
@@ -375,7 +380,7 @@ def lasing_threshold(params, deltas=None, num_scan_points=250, as_func_off='delt
     if verbose: print(f'\tz solutions shape:{np.shape(z_sols)}')    
     if verbose: print(f'\tthresholds shape:{np.shape(thresholds)}')
     
-    thresholds_filtered = thresholds#filter_arrays(thresholds)
+    thresholds_filtered = filter_arrays(thresholds)
     if verbose: print(f'\tthresholds shape (after filtering):{np.shape(thresholds_filtered)}')
     if len(thresholds_filtered) == 0:
         return []
@@ -432,9 +437,7 @@ def compute_eigs(params):
     eigvecs = []
     if verbose: print('EIGENVALUES AND EIGENVECTORS:')
     for i, root in enumerate(roots):
-
-        dL = dL_star(root, params)
-        vals, vecs = np.linalg.eig(construct_jacobian(root, params, dL))
+        vals, vecs = np.linalg.eig(construct_jacobian(root, params))
         eigvals.append(vals)
         eigvecs.append(vecs)
         if verbose: print(f'\troot {i}')

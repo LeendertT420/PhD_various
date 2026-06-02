@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
+from equations import mu_spectrum
 
 # =====================================================================
 # CONFIGURATION: MATCH THIS SELECTION TO YOUR __MAIN__ SWEEP ORDERING
@@ -31,7 +32,12 @@ axis_mapping = {name: idx for idx, name in enumerate(PARAM_ORDER)}
 
 # Re-compute the real-world timeline vector based on the saved shape
 # (Matches your main script logic: t_span_eval timeline duration)
-t_real = np.linspace(0, num_time_steps - 1, num_time_steps) 
+t_span = (0.0, 1000.0)
+Dt_eval = 2*np.pi*5 / np.sqrt(mu_spectrum(N)[0]) # span ensures 5 oscillations of the heaviest (slowest) oscillator
+t_span_eval = (t_span[1]-Dt_eval, t_span[1]) # evaluate on the last part of the simulation
+t_res_eval = 2*np.pi / (np.sqrt(mu_spectrum(N)[-1]) * 20)
+t_real = np.linspace(t_span_eval[0], t_span_eval[1], int(abs(t_span_eval[1] - t_span_eval[0])/t_res_eval))
+print(t_real)
 
 # =====================================================================
 # CANVAS AND GRAPHICS ARCHITECTURE
