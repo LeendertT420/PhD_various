@@ -465,7 +465,7 @@ def update(val, update_solver=False, update_thresholds=False):
     
         X0 = np.concatenate([np.full(N, x0), np.full(N, y0), [z0]])
         print(X0)
-        t_eval = np.linspace(0, T, 5000)
+        t_eval = np.linspace(0, T, int(T*200))
 
         sol = solve_ivp(
             lambda t, X: system(t, X, params),
@@ -483,7 +483,7 @@ def update(val, update_solver=False, update_thresholds=False):
         ax3.set_ylim(np.min(X), np.max(X))
 
         
-        t_eval = np.linspace(T, T+200, 5000)
+        t_eval = np.linspace(T, T+200, int(200*200))
 
         sol = solve_ivp(
             lambda t, X: system(t, X, params),
@@ -503,7 +503,7 @@ def update(val, update_solver=False, update_thresholds=False):
 
 
         fft_values = np.fft.rfft(X-np.mean(X))
-        frequencies = np.fft.rfftfreq(len(X), d=200/5000)
+        frequencies = np.fft.rfftfreq(len(X), d=1/200)
 
         amplitude = 2.0 * np.abs(fft_values) / len(X)
         amplitude[0] /= 2.0
@@ -541,6 +541,8 @@ sN.on_changed(lambda val: update(val,
 sT.on_changed(lambda val: update(val,
                                  update_solver=True,
                                  update_thresholds=True))
+sS.on_changed(lambda val: update(val,
+                                 update_solver=True))
 sTime.on_changed(lambda val: update(val,
                                  update_solver=True))
 sx0.on_changed(lambda val: update(val,

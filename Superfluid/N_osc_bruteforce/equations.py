@@ -16,92 +16,51 @@ np.set_printoptions(precision=5)
 
 
 
-def system(t, state, params):
+@njit(fastmath=True)
+def ode_vector_field(t, state, N, gamma, mu, tau, alpha, delta, sigma, chi):
     """
-    Computes the ODE system
-
-        x_dot_i = y_i
-
-        y_dot_i = -gamma_i y_i
-                  - mu_i x_i
-                  + mu_i z
-                  + (mu_i / sigma) * sum_{j,k} chi_ijk x_j x_k
-
-        z_dot = (1/tau) * (
-                    alpha / ((delta + sum_i x_i)^2 + 1)
-                    - z
-                )
-
-    Parameters
-    ----------
-    t : float
-        Time (unused, included for solve_ivp compatibility)
-
-    state : ndarray, shape (2N + 1,)
-        State vector:
-            state = [x_1,...,x_N, y_1,...,y_N, z]
-
-    gamma : ndarray, shape (N,)
-    mu : ndarray, shape (N,)
-    chi : ndarray, shape (N,N,N)
-    sigma : float
-    alpha : float
-    delta : float
-    tau : float
-
-    Returns
-    -------
-    dstate_dt : ndarray, shape (2N + 1,)
+    Highly optimized, raw math vector field. 
+    State layout: [x_1...x_N, y_1...y_N, z] (Size: 2N + 1)
     """
-
-    N = params['N']
-    mu = params['mu']
-    gamma = params['gamma']
-    sigma = params['sigma']
-    alpha = params['alpha']
-    delta = params['delta']
-    tau = params['tau']
-    chi = params['chi'][:N,:N,:N]
-
-
-    # unpack state
-    x = state[:N]
+    # Unpack state
+    x = state[0:N]
     y = state[N:2*N]
-    z = state[-1]
+    z = state[2*N]
+    
+    # Preallocate derivatives
+    derivatives = np.empty(2 * N + 1)
+    dx = derivatives[0:N]
+    dy = derivatives[N:2*N]
+    
+    # 1. dx_i/dt = y_i
+    dx[:] = y
+    
+    # 2. Compute the quadratic interaction tensor term: (mu_i / sigma) * sum(chi_ijk * x_j * x_k)
+    # Fast nested loops are completely fine because Numba compiles them to raw C loops.
+    tensor_term = np.zeros(N)
+    for i in range(N):
+        s = 0.0
+        for j in range(N):
+            # Only loop over unique pairs j <= k
+            # j == k case (appears 1 time)
+            s += chi[i, j, j] * x[j] * x[j]
+            
+            # j < k case (appears 2 times: jk and kj)
+            for k in range(j + 1, N):
+                s += 2.0 * chi[i, j, k] * x[j] * x[k]
+                
+        tensor_term[i] = (mu[i] / sigma) * s
 
-    # --- x equations ---
-    x_dot = y
-
-    # --- nonlinear interaction term ---
-    #
-    # interaction[i] = sum_{j,k} chi[i,j,k] x_j x_k
-    #
-    interaction = np.einsum('ijk,j,k->i', chi, x, x)
-
-    # --- y equations ---
-    y_dot = (
-        -gamma * y
-        -mu * x
-        +mu * z
-        +(mu / sigma) * interaction
-    )
-
-    # --- z equation ---
-    z_dot = (
-        1.0 / tau
-    ) * (
-        alpha / ((delta + np.sum(x))**2 + 1.0)
-        - z
-    )
-
-    # concatenate into one vector
-    dstate_dt = np.concatenate([
-        x_dot,
-        y_dot,
-        np.array([z_dot])
-    ])
-
-    return dstate_dt
+    # 3. dy_i/dt
+    for i in range(N):
+        dy[i] = -gamma[i]*y[i] - mu[i]*x[i] + mu[i]*z + tensor_term[i]
+        
+    # 4. dz/dt
+    sum_x = np.sum(x)
+    dz = (1.0 / tau) * ((alpha / ((delta + sum_x)**2 + 1.0)) - z)
+    derivatives[2*N] = dz
+    
+    return derivatives
 
 
 
@@ -317,9 +276,11 @@ def find_pure_imag_crossings(params, dL_min, dL_max, num_scan_points=250):
 
     J0 = construct_jacobian(None, params, modecoupling=False, opticalcoupling=False)
 
+    N = params['N']
     tau = params['tau']
 
     def eigen_decomposition(dL):
+        N = int((np.shape(J0)[0]-1)/2)
         J = J0.copy()
         J[-1, 0:N] = np.full((1, N), dL/tau)
         eigvals = np.linalg.eigvals(J)
@@ -453,9 +414,6 @@ def filter_arrays(arr_list):
 # Jacobian
 # -----------------------------
 
-
-
-
 def extract_real_entries(arr, epsilon=1e-5):
     """
     Return all entries whose imaginary part is smaller than epsilon.
@@ -466,10 +424,6 @@ def extract_real_entries(arr, epsilon=1e-5):
     mask = np.abs(arr.imag) < epsilon
 
     return arr.real[mask]
-
-
-
-
 
 def compute_eigs(params):
     roots = fixed_points_num(params)
@@ -493,142 +447,3 @@ def compute_eigs(params):
 
 
 
-# -----------------------------
-# SYSTEM
-# -----------------------------
-
-
-
-def project_onto_plane(x, v1, v2):
-    """
-    Project vector x onto the plane spanned by v1 and v2.
-
-    Parameters:
-        x, v1, v2 : array-like (shape: (n,))
-    
-    Returns:
-        projection of x onto span{v1, v2}
-    """
-    # Stack vectors as columns of A (n x 2 matrix)
-    A = np.column_stack((v1, v2))
-    
-    # Compute projection: A (A^T A)^{-1} A^T x
-    ATA_inv = np.linalg.inv(A.T @ A)
-    projection = A @ ATA_inv @ A.T @ x
-    
-    return projection
-
-
-def project_onto_line(x, v):
-    """
-    Project vector x onto the line spanned by vector v.
-
-    Parameters
-    ----------
-    x : array-like
-        Vector to be projected
-    v : array-like
-        Direction vector of the line
-
-    Returns
-    -------
-    numpy.ndarray
-        Projection of x onto span(v)
-    """
-    x = np.asarray(x)
-    v = np.asarray(v)
-
-    return (np.dot(x, v) / np.dot(v, v)) * v
-
-
-def transform_matrix(N):
-    """
-    Construct the (2N+1)x(2N+1) transformation matrix for
-
-    (x1,y1,...,xN,yN,z) -> (X,Y,u2,v2,...,uN,vN,z)
-
-    where
-        X = (1/N) sum_i x_i
-        Y = (1/N) sum_i y_i
-        u_i = x_i - X
-        v_i = y_i - Y
-    """
-    M = np.zeros((2*N + 1, 2*N + 1))
-
-    # Row for X
-    for i in range(N):
-        M[0, 2*i] = 1
-
-    # Row for Y
-    for i in range(N):
-        M[1, 2*i + 1] = 1
-
-    # Rows for u_i, v_i (i = 2,...,N)
-    for i in range(1, N):   # zero-based: i=1 corresponds to u2,v2
-        row_u = 2*i
-        row_v = 2*i + 1
-
-        # u_i = x_i - X = x_i - (1/N) sum_j x_j
-        for j in range(N):
-            M[row_u, 2*j] = -1
-        M[row_u, 2*i] = N - 1
-
-        # v_i = y_i - Y = y_i - (1/N) sum_j y_j
-        for j in range(N):
-            M[row_v, 2*j + 1] = -1
-        M[row_v, 2*i + 1] = N - 1
-
-    # z unchanged
-    M[-1, -1] = N
-
-    return M / N
-
-
-def inverse_transform_matrix(N):
-    """
-    Construct the inverse transformation matrix for
-
-    (X,Y,u2,v2,...,uN,vN,z) -> (x1,y1,...,xN,yN,z)
-
-    Returns a (2N+1)x(2N+1) matrix.
-    """
-    M = np.zeros((2*N + 1, 2*N + 1))
-
-    # x1 = X - sum_{i=2}^N u_i
-    M[0, 0] = 1
-    for i in range(1, N):
-        M[0, 2*i] = -1
-
-    # y1 = Y - sum_{i=2}^N v_i
-    M[1, 1] = 1
-    for i in range(1, N):
-        M[1, 2*i + 1] = -1
-
-    # xi = X + ui, yi = Y + vi  for i=2,...,N
-    for i in range(1, N):
-        row_x = 2*i
-        row_y = 2*i + 1
-
-        M[row_x, 0] = 1          # X contribution
-        M[row_x, 2*i] = 1        # ui contribution
-
-        M[row_y, 1] = 1          # Y contribution
-        M[row_y, 2*i + 1] = 1    # vi contribution
-
-    # z unchanged
-    M[-1, -1] = 1
-
-    return M
-            
-
-
-
-
-if __name__ == '__main__':
-    N = 2
-    gs = np.array([1, 1,2, 6, 7, 7])
-    mus = np.array([1, 2,6, 6, 9, 10])
-    a = 1
-    t = 2
-    d = 1
-    z = z_star(N, a, d)[0]
