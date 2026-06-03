@@ -91,11 +91,10 @@ def _parallel_worker(task_args):
         t_span=t_span,
         y0=u0,
         args=(sys.N, sys.gamma, sys.mu, sys.tau, sys.alpha, sys.delta, sys.sigma, sys.chi),
-        method='Radau',
-        rtol=1e-6, atol=1e-8,
-        first_step=0.01,
-        max_step=0.1,
-        t_eval=t_eval
+        method='BDF',
+        t_eval=t_eval,
+        jac=jac_for_solver,
+        rtol=1e-6, atol=1e-9
     )
 
     roots, vals, vecs = compute_eigs(sys_params)
@@ -294,3 +293,7 @@ if __name__ == '__main__':
                         above_threshold=above_threshold_tensor, exploded=exploded_tensor)
     
     print(f'Successfully saved simulation outputs to {filename}')
+
+
+    print(f'total number of simulations : {exploded_tensor.size}')
+    print(f'number of failed simulations: {np.sum(exploded_tensor)}')

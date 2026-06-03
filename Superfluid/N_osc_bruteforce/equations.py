@@ -273,6 +273,89 @@ def construct_jacobian(x_star, params, modecoupling=True, opticalcoupling=True):
     return J
 
 
+
+def jac_for_solver(t, y, N, gamma, mu, tau, alpha, delta, sigma, chi):
+    """
+    Construct the block Jacobian matrix
+
+        J = [[0, I, 0],
+             [A, Γ, μ],
+             [L, 0, -1/tau]]
+
+    Parameters
+    ----------
+    gamma : (N,) array_like
+        Vector γ_i
+
+    mu : (N,) array_like
+        Vector μ_i
+
+    x_star : (N,) array_like
+        Fixed point vector x*_i
+
+    chi : (N, N, N) array_like
+        Tensor χ_ijk
+
+    sigma : float
+        Scalar σ
+
+    tau : float
+        Scalar τ
+
+    dL : (N,) array_like
+        Vector of partial derivatives:
+            dL_j = ∂L*/∂x_j / τ
+
+    Returns
+    -------
+    J : (2N+1, 2N+1) ndarray
+        Full Jacobian matrix
+    """
+
+    # --- Block matrices ---
+
+    # 0 block
+    O = np.zeros((N, N))
+
+    # Identity block
+    I = np.eye(N)
+
+    # Gamma block
+    Gamma = -np.diag(gamma)
+
+    # mu column block
+    mu_col = mu.reshape(N, 1)
+
+    # L row block
+    p = np.sum(y[:N]) + delta
+    dL = -2 * alpha * p / (p**2 + 1)**2
+    L_row = np.full((1, N), dL/tau)
+
+    # A block
+    A = np.zeros((N, N))
+
+    for i in range(N):
+        for j in range(N):
+            interaction_sum = np.sum(chi[i, j, :] * y[:N])
+
+            A[i, j] = (
+                    -mu[i] * (i == j)
+                    + (2.0 * mu[i] / sigma) * interaction_sum)
+
+    # --- Assemble full Jacobian ---
+
+    top = np.hstack([O, I, np.zeros((N, 1))])
+
+    middle = np.hstack([A, Gamma, mu_col])
+
+    bottom = np.hstack([L_row, np.zeros((1, N)), np.array([[-1.0 / tau]])])
+
+    J = np.vstack([top, middle, bottom])
+
+    return J
+
+
+
 # -----------------------------
 # lasing threshold
 # -----------------------------

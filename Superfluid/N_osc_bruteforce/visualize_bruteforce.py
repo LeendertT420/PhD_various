@@ -22,6 +22,7 @@ param_vectors = {
 states = data['states']          # Shape: (len_p1, len_p2, len_p3, 2N+1, num_steps)
 above_thresh = data['above_threshold']
 exploded = data['exploded']
+print(exploded)
 
 
 # Dense pad array collection checks for stability tracking
