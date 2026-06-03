@@ -11,10 +11,10 @@ from equations import *
 # =====================================================================
 @njit(fastmath=True)
 def ode_vector_field(t, state, N, gamma, mu, tau, alpha, delta, sigma, chi):
-    """
+    '''
     Optimized ODE vector field exploiting the full 3-way symmetry of chi_ijk.
     State layout: [x_1...x_N, y_1...y_N, z]
-    """
+    '''
     x = state[0:N]
     y = state[N:2*N]
     z = state[2*N]
@@ -67,22 +67,22 @@ class OscillatorSystem:
 
 
 def _parallel_worker(task_args):
-    """Isolated worker function designed for multi-core serialization with
+    '''Isolated worker function designed for multi-core serialization with
 
     strict shape protection on numerical blow-ups.
-    """
+    '''
     sys_params, t_span, u0, t_eval, coords, alpha_threshold = task_args
     
     if sys_params['alpha'] < alpha_threshold:
         return {
-            "coords": coords,
-            "above_threshold": False,
-            "exploded": False,
-            "final_single_state": u0, # Pass along incoming hot-start unaltered
-            "raw_tail": np.full((expected_vars, expected_steps), np.nan), # Clean NaN array block
-            "roots": None,
-            "eigvals": None,
-            "eigvecs": None
+            'coords': coords,
+            'above_threshold': False,
+            'exploded': False,
+            'final_single_state': u0, # Pass along incoming hot-start unaltered
+            'raw_tail': np.full((2 * sys.N + 1, len(t_eval)), np.nan), # Clean NaN array block
+            'roots': None,
+            'eigvals': None,
+            'eigvecs': None
         }
     
     sys = OscillatorSystem(**sys_params)
@@ -91,7 +91,7 @@ def _parallel_worker(task_args):
         t_span=t_span,
         y0=u0,
         args=(sys.N, sys.gamma, sys.mu, sys.tau, sys.alpha, sys.delta, sys.sigma, sys.chi),
-        method='RK45',
+        method='Radau',
         rtol=1e-6, atol=1e-8,
         first_step=0.01,
         max_step=0.1,
@@ -100,20 +100,7 @@ def _parallel_worker(task_args):
 
     roots, vals, vecs = compute_eigs(sys_params)
 
-    # Expected target dimensions for the output array tensor
-    expected_vars = 2 * sys.N + 1
-    expected_steps = len(t_eval)
-    
-    # Check 1: Did the solver cut short/fail to match our t_eval layout?
-    if sol.y.shape[1] != expected_steps:
-        exploded = True
-    else:
-        # Check 2: Are any values non-finite (NaN/Inf) or unphysically massive?
-        final_single_state = sol.y[:, -1]
-        if np.any(~np.isfinite(final_single_state)) or np.max(np.abs(final_single_state)) > 1e3:
-            exploded = True
-        else:
-            exploded = False
+    exploded = not sol.success
 
     # --- ENFORCE RIGID SHAPE OUTPUTS ---
     if not exploded:
@@ -121,7 +108,7 @@ def _parallel_worker(task_args):
         final_single_state = sol.y[:, -1]
     else:
         # If it failed or blew up, fill a pristine matrix matching the exact expected shape with NaNs
-        raw_tail = np.full((expected_vars, expected_steps), np.nan)
+        raw_tail = np.full((2 * sys.N + 1, len(t_eval)), np.nan)
         # Fall back to default initial conditions if this vector is pulled as a hot-start next layer
         final_single_state = np.concatenate([
             np.zeros(sys.N), 
@@ -130,22 +117,22 @@ def _parallel_worker(task_args):
         ])
         
     return {
-        "coords": coords,
+        'coords': coords,
         'above_threshold': True,
-        "exploded": exploded,
-        "final_single_state": final_single_state,
-        "raw_tail": raw_tail,
-        "roots": roots,
-        "eigvals": vals,
-        "eigvecs": vecs
+        'exploded': exploded,
+        'final_single_state': final_single_state,
+        'raw_tail': raw_tail,
+        'roots': roots,
+        'eigvals': vals,
+        'eigvecs': vecs
     }
 
 
 class LayeredParallelSmartSweeper:
-    """Slices a 3D parameter grid into 2D layers, evaluating each layer in parallel
+    '''Slices a 3D parameter grid into 2D layers, evaluating each layer in parallel
 
     while passing the final state from the geometrically closest completed grid element as a hot start.
-    """
+    '''
     def __init__(self, base_config, t_span, default_u0, t_span_eval, t_res_eval=0.1):
         self.base_config = base_config
         self.t_span = t_span
@@ -156,7 +143,7 @@ class LayeredParallelSmartSweeper:
         self.history_states = []
 
     def _get_closest_initial_state(self, target_coords):
-        """Finds the closest available historical state vector using Euclidean distance."""
+        '''Finds the closest available historical state vector using Euclidean distance.'''
         if not self.history_coords:
             return self.default_u0
         
@@ -169,10 +156,10 @@ class LayeredParallelSmartSweeper:
         num_cores = mp.cpu_count()
         
         # Outer Progress Bar (Iterates sequentially through slices)
-        outer_pbar = tqdm(p1_vals, desc=f"Overall {p1_name} layers", position=0, leave=True)
+        outer_pbar = tqdm(p1_vals, desc=f'Overall {p1_name} layers', position=0, leave=True)
         
         for v1 in outer_pbar:
-            outer_pbar.set_postfix_str(f"Current {p1_name}={v1:.2f}")
+            outer_pbar.set_postfix_str(f'Current {p1_name}={v1:.2f}')
             
             tasks = []
             # Build the parallel tasks batch for the current 2D plane slice
@@ -201,16 +188,16 @@ class LayeredParallelSmartSweeper:
                 _parallel_worker, 
                 tasks, 
                 max_workers=num_cores,
-                desc=" └─ Parallel Slice Processing",
+                desc=' └─ Parallel Slice Processing',
                 position=1, 
                 leave=False
             )
             
             # Harvest and save clean records to history to prepare for the next layer step
             for res in layer_results:
-                if res["above_threshold"] and not res["exploded"]:
-                    self.history_coords.append(res["coords"])
-                    self.history_states.append(res["final_single_state"])
+                if res['above_threshold'] and not res['exploded']:
+                    self.history_coords.append(res['coords'])
+                    self.history_states.append(res['final_single_state'])
                 
                 results.append(res)
                 
@@ -220,21 +207,21 @@ class LayeredParallelSmartSweeper:
 # =====================================================================
 # 3. PIPELINE EXECUTION ENGINE
 # =====================================================================
-if __name__ == "__main__":
-    N = 3
+if __name__ == '__main__':
+    N = 15
 
     # Correct 3D array index parsing logic
     chi_data = np.load('./chi_ijk.npy')[:N, :N, :N]
 
     base_config = {
-        "N": N,
-        "gamma": np.ones(N) * 0.05,
-        "mu": mu_spectrum(N),
-        "tau": 1.0,
-        "alpha": 1.0,
-        "delta": 0.0,
-        "sigma": 20.0,
-        "chi": chi_data
+        'N': N,
+        'gamma': np.ones(N) * 0.05,
+        'mu': mu_spectrum(N),
+        'tau': 1.0,
+        'alpha': 1.0,
+        'delta': 0.0,
+        'sigma': 20.0,
+        'chi': chi_data
     }
     default_u0 = np.concatenate([
         np.random.uniform(-0.5, 0.5, N), 
@@ -260,18 +247,20 @@ if __name__ == "__main__":
     
     # Execute the Pipeline
     sweep_data = sweeper.run_layered_parallel_sweep(
-        p1_name="alpha", p1_vals=alphas,
-        p2_name="delta", p2_vals=deltas,
-        p3_name="sigma", p3_vals=sigmas # if lthreshold is given, p1 should be alpha and p2 should be delta
+        p1_name='alpha', p1_vals=alphas,
+        p2_name='delta', p2_vals=deltas,
+        p3_name='sigma', p3_vals=sigmas # if lthreshold is given, p1 should be alpha and p2 should be delta
     )
     
     # Map the compiled records to a highly accessible 5-dimensional NumPy Array Data Block
-    print("\nWriting data...")
+    print('\nWriting data...')
     dim = 2 * N + 1
     state_tensor = np.zeros((len(alphas), len(deltas), len(sigmas), dim, int(abs(t_span_eval[1] - t_span_eval[0])/t_res_eval)))
     roots_tensor = np.full((len(alphas), len(deltas), len(sigmas), 3, dim), np.nan)
     eigvals_tensor = np.full((len(alphas), len(deltas), len(sigmas), 3, dim), np.nan, dtype=complex)
     eigvecs_tensor = np.full((len(alphas), len(deltas), len(sigmas), 3, dim, dim), np.nan, dtype=complex)
+    above_threshold_tensor = np.full((len(alphas), len(deltas), len(sigmas)), True, dtype=bool)
+    exploded_tensor = np.full((len(alphas), len(deltas), len(sigmas)), False, dtype=bool)
 
     
     idx = 0
@@ -279,21 +268,29 @@ if __name__ == "__main__":
         for j in range(len(deltas)):
             for k in range(len(sigmas)):
                 res = sweep_data[idx]
-                state_tensor[i, j, k, :, :] = res["raw_tail"]
+                state_tensor[i, j, k, :, :] = res['raw_tail']
 
-                if res["above_threshold"] and not res["exploded"] and len(res["roots"]) > 0:
-                    num_found = len(res["roots"])
+                above_threshold_tensor[i,j,k] = res['above_threshold']
+                exploded_tensor[i,j,k] = res['exploded']
+
+                if res['above_threshold'] and not res['exploded'] and len(res['roots']) > 0:
+                    num_found = len(res['roots'])
                     
                     # Assign the found data up to the actual count; remaining slots stay NaN
-                    roots_tensor[i, j, k, :num_found, :] = res["roots"]
-                    eigvals_tensor[i, j, k, :num_found, :] = res["eigvals"]
-                    eigvecs_tensor[i, j, k, :num_found, :, :] = res["eigvecs"]
+                    roots_tensor[i, j, k, :num_found, :] = res['roots']
+                    eigvals_tensor[i, j, k, :num_found, :] = res['eigvals']
+                    eigvecs_tensor[i, j, k, :num_found, :, :] = res['eigvecs']
 
                 idx += 1
 
     # Save to disk
-    np.savez_compressed(f'sweep_results_N={N}.npz', 
+    filename = f'sweep_results_N={N}.npz'
+
+    time = np.linspace(t_span_eval[0], t_span_eval[1], int(Dt_eval/t_res_eval))
+
+    np.savez_compressed(filename, time=time, 
                         alphas=alphas, deltas=deltas, sigmas=sigmas, states=state_tensor,
-                        roots=roots_tensor, eigvals=eigvals_tensor, eigvecs=eigvecs_tensor)
+                        roots=roots_tensor, eigvals=eigvals_tensor, eigvecs=eigvecs_tensor,
+                        above_threshold=above_threshold_tensor, exploded=exploded_tensor)
     
-    print("Successfully saved simulation outputs to sweep_results.npz!")
+    print(f'Successfully saved simulation outputs to {filename}')
