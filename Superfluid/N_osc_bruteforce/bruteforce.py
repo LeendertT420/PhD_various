@@ -1,124 +1,73 @@
 import numpy as np
-from scipy.integrate import solve_ivp
-from numba import njit
 import multiprocessing as mp
+
+from scipy.integrate import solve_ivp
+
 from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
-from equations import *
+import copy
+from equations import * 
 
 # =====================================================================
-# 1. OPTIMIZED PHYSICS ENGINE (Symmetry + Machine Code Compilation)
+# 1. HARDENED PARALLEL WORKER EXECUTOR
 # =====================================================================
-@njit(fastmath=True)
-def ode_vector_field(t, state, N, gamma, mu, tau, alpha, delta, sigma, chi):
-    '''
-    Optimized ODE vector field exploiting the full 3-way symmetry of chi_ijk.
-    State layout: [x_1...x_N, y_1...y_N, z]
-    '''
-    x = state[0:N]
-    y = state[N:2*N]
-    z = state[2*N]
-    
-    derivatives = np.empty(2 * N + 1)
-    dx = derivatives[0:N]
-    dy = derivatives[N:2*N]
-    
-    # dx_i/dt = y_i
-    dx[:] = y
-    
-    # Exploit 3-way tensor symmetry: collapses loop complexity
-    tensor_term = np.zeros(N)
-    for i in range(N):
-        s = 0.0
-        for j in range(N):
-            # Case j == k (appears 1 time)
-            s += chi[i, j, j] * x[j] * x[j]
-            
-            # Case j < k (appears 2 times: jk and kj match)
-            for k in range(j + 1, N):
-                s += 2.0 * chi[i, j, k] * x[j] * x[k]
-                
-        tensor_term[i] = (mu[i] / sigma) * s
-
-    # dy_i/dt
-    for i in range(N):
-        dy[i] = -gamma[i]*y[i] - mu[i]*x[i] + mu[i]*z + tensor_term[i]
-        
-    # dz/dt
-    sum_x = np.sum(x)
-    derivatives[2*N] = (1.0 / tau) * ((alpha / ((delta + sum_x)**2 + 1.0)) - z)
-    
-    return derivatives
-
-
-# =====================================================================
-# 2. OBJECT-ORIENTED INTERFACE AND EXECUTORS
-# =====================================================================
-class OscillatorSystem:
-    def __init__(self, N, gamma, mu, tau, alpha, delta, sigma, chi):
-        self.N = N
-        self.gamma = np.atleast_1d(gamma)
-        self.mu = np.atleast_1d(mu)
-        self.tau = tau
-        self.alpha = alpha
-        self.delta = delta
-        self.sigma = sigma
-        self.chi = chi 
-
-
 def _parallel_worker(task_args):
     '''Isolated worker function designed for multi-core serialization with
-
-    strict shape protection on numerical blow-ups.
+    strict memory boundaries and explicit tracking data isolation.
     '''
-    sys_params, t_span, u0, t_eval, coords, alpha_threshold = task_args
+    sys_params, t_span, u0, t_eval, coords, use_3d, use_4d, alpha_threshold = task_args
     
-    if sys_params['alpha'] < alpha_threshold:
-        return {
-            'coords': coords,
-            'above_threshold': False,
-            'exploded': False,
-            'final_single_state': u0, # Pass along incoming hot-start unaltered
-            'raw_tail': np.full((2 * sys.N + 1, len(t_eval)), np.nan), # Clean NaN array block
-            'roots': None,
-            'eigvals': None,
-            'eigvecs': None
-        }
+    # 1. Unpack and forcefully isolate memory blocks to prevent cross-core leaks
+    sys_params_local = sys_params
+    N_local = sys_params_local['N']
     
-    sys = OscillatorSystem(**sys_params)
+    dim = 2 * N_local + 1
+    
+    # 2. Solver Execution Block
+    # Utilizing 'Radau' to natively leverage your analytical Jacobian matrix.
     sol = solve_ivp(
-        fun=ode_vector_field,
+        fun=system_numba,
         t_span=t_span,
-        y0=u0,
-        args=(sys.N, sys.gamma, sys.mu, sys.tau, sys.alpha, sys.delta, sys.sigma, sys.chi),
-        method='BDF',
+        y0=u0,  # Actively utilizing the hot-start trajectory vector
+        args=(sys_params_local, use_3d, use_4d),
+        method='RK45',              # STIFF SOLVER FIX: Activates analytical Jacobian
         t_eval=t_eval,
-        jac=jac_for_solver,
-        rtol=1e-6, atol=1e-9
+        jac=Jacobian_numba,          # Passed Jacobian function
+        rtol=1e-6, atol=1e-8,
+        first_step=1e-5
     )
 
     roots, vals, vecs = compute_eigs(sys_params)
 
-    exploded = not sol.success
 
-    # --- ENFORCE RIGID SHAPE OUTPUTS ---
-    if not exploded:
+    # 3. Enforce Rigid Shape Outputs
+    if sol.success:
         raw_tail = sol.y
         final_single_state = sol.y[:, -1]
     else:
-        # If it failed or blew up, fill a pristine matrix matching the exact expected shape with NaNs
-        raw_tail = np.full((2 * sys.N + 1, len(t_eval)), np.nan)
-        # Fall back to default initial conditions if this vector is pulled as a hot-start next layer
+        print(sol)
+        # Step-size failure tracking fallback
+        if len(sol.t) == 0:
+            timestep_fail = 0
+            state_fail = np.ones(2*N_local+1)
+        else:
+            timestep_fail = sol.t[-1]
+            state_fail = sol.y[:,-1]
+        print(sol.message)
+        print(f'failed at timestep {timestep_fail}')
+        print(f'derivatives: {system(timestep_fail, state_fail, sys_params_local, use_3d, use_4d)}')
+
+        raw_tail = np.full((dim, len(t_eval)), np.nan)
         final_single_state = np.concatenate([
-            np.zeros(sys.N), 
-            np.zeros(sys.N),                     
-            [0.1]                                                        
+            np.zeros(N_local), 
+            np.zeros(N_local),                     
+            [0.1]                                                                                   
         ])
         
     return {
         'coords': coords,
         'above_threshold': True,
-        'exploded': exploded,
+        'exploded': not sol.success,
         'final_single_state': final_single_state,
         'raw_tail': raw_tail,
         'roots': roots,
@@ -127,27 +76,45 @@ def _parallel_worker(task_args):
     }
 
 
+# =====================================================================
+# 2. LAYERED GEOMETRIC SMART SWEEPER
+# =====================================================================
 class LayeredParallelSmartSweeper:
     '''Slices a 3D parameter grid into 2D layers, evaluating each layer in parallel
-
     while passing the final state from the geometrically closest completed grid element as a hot start.
     '''
-    def __init__(self, base_config, t_span, default_u0, t_span_eval, t_res_eval=0.1):
+    def __init__(self, base_config, t_span, default_u0, t_span_eval, use_3d, use_4d, N_points : int = 250):
         self.base_config = base_config
         self.t_span = t_span
         self.default_u0 = default_u0
-        self.t_eval = np.linspace(t_span_eval[0], t_span_eval[1], int(abs(t_span_eval[1] - t_span_eval[0])/t_res_eval))
+        self.use_3d = use_3d
+        self.use_4d = use_4d
+        self.t_eval = np.linspace(t_span_eval[0], t_span_eval[1], N_points)
         
         self.history_coords = []
         self.history_states = []
 
     def _get_closest_initial_state(self, target_coords):
-        '''Finds the closest available historical state vector using Euclidean distance.'''
+        '''Finds the completed historical state vector whose delta value 
+        is closest to the target delta.
+        
+        Coordinates map as: (alpha, delta, sigma) -> indices (0, 1, 2)
+        '''
         if not self.history_coords:
             return self.default_u0
         
-        distances = np.linalg.norm(np.array(self.history_coords) - np.array(target_coords), axis=1)
+        # 1. Isolate the target delta parameter
+        target_delta = target_coords[1]
+        
+        # 2. Extract only the historical delta values (index 1 of each tuple)
+        history_deltas = np.array([coords[1] for coords in self.history_coords])
+        
+        # 3. Compute absolute distances along the delta axis exclusively
+        distances = np.abs(history_deltas - target_delta)
+        
+        # 4. Find the index of the minimum distance element
         closest_index = np.argmin(distances)
+        
         return self.history_states[closest_index]
 
     def run_layered_parallel_sweep(self, p1_name, p1_vals, p2_name, p2_vals, p3_name, p3_vals, lthreshold=None):
@@ -163,26 +130,23 @@ class LayeredParallelSmartSweeper:
             tasks = []
             # Build the parallel tasks batch for the current 2D plane slice
             for i, v2 in enumerate(p2_vals):
-                
-                if lthreshold is not None:
-                    alpha_threshold = lthreshold[i]
-                else:
-                    alpha_threshold = 0
+                alpha_threshold = lthreshold[i] if lthreshold is not None else 0
 
                 for v3 in p3_vals:
                     current_coords = (v1, v2, v3)
                     
-                    # Pull best starting guess vector out of history
+                    # Extract historical attractor trajectory
                     u0_hot = self._get_closest_initial_state(current_coords)
                     
-                    run_config = self.base_config.copy()
+                    # Isolate configuration dictionaries explicitly
+                    run_config = copy.deepcopy(self.base_config)
                     run_config[p1_name] = v1
                     run_config[p2_name] = v2
                     run_config[p3_name] = v3
                     
-                    tasks.append((run_config, self.t_span, u0_hot, self.t_eval, current_coords, alpha_threshold))
+                    tasks.append((run_config, self.t_span, u0_hot, self.t_eval, current_coords, self.use_3d, self.use_4d, alpha_threshold))
             
-            # Execute the 2D slice concurrently across your CPU cores
+            # Execute the 2D slice concurrently across CPU cores
             layer_results = process_map(
                 _parallel_worker, 
                 tasks, 
@@ -207,93 +171,155 @@ class LayeredParallelSmartSweeper:
 # 3. PIPELINE EXECUTION ENGINE
 # =====================================================================
 if __name__ == '__main__':
-    N = 15
+    N = 5
 
-    # Correct 3D array index parsing logic
-    chi_data = np.load('./chi_ijk.npy')[:N, :N, :N]
+    use_3d = True
+    use_4d = True
 
-    base_config = {
-        'N': N,
-        'gamma': np.ones(N) * 0.05,
-        'mu': mu_spectrum(N),
-        'tau': 1.0,
-        'alpha': 1.0,
-        'delta': 0.0,
-        'sigma': 20.0,
-        'chi': chi_data
-    }
+    base_config = {'N': N,
+                   'gamma': np.ones(N) * 0.05,
+                   'mu': mu_spectrum(N),
+                   'tau': 1.0,
+                   'alpha': 1.0,
+                   'delta': 0.0,
+                   'sigma': 20.0,
+                   'chi_ijk': np.load('./tensors/chi_ijk.npy')[:N, :N, :N],
+                   'chi_ijkl': np.load('./tensors/chi_ijkl.npy')[:N, :N, :N, :N],
+                   'xi': np.ones(N)}
+    
     default_u0 = np.concatenate([
-        np.random.uniform(-0.5, 0.5, N), 
+        np.random.uniform(-0.5, 0.5, N),
         np.zeros(N),                     
-        [0.1]                                                        
-    ])
+        [0.1]])
     
+    # Precompute time evaluation boundaries
     t_span = (0.0, 1000.0)
-    Dt_eval = 2*np.pi*5 / np.sqrt(base_config['mu'][0]) # span ensures 5 oscillations of the heaviest (slowest) oscillator
-    t_span_eval = (t_span[1]-Dt_eval, t_span[1]) # evaluate on the last part of the simulation
-    t_res_eval = 2*np.pi / (np.sqrt(base_config['mu'][-1]) * 20) # resolution ensures 10 points per oscillation for the lightest (fastest) oscillator
 
-    
+    Dt_eval = 2*np.pi*10 / np.sqrt(base_config['mu'][0])
+
+    t_span_eval = (t_span[1]-Dt_eval, t_span[1])
+
+    N_points = int(10*20*np.sqrt(base_config['mu'][-1]/base_config['mu'][0]))
+
+    # =====================================================================
+    # NUMBA COMPILATION RACE-CONDITION SAFEGUARD
+    # =====================================================================
+    print("Pre-compiling Numba physics engine on main thread...")
+    dummy_y = np.zeros(2 * N + 1)
+    _ = system_numba(0.0, dummy_y, base_config)
+    _ = Jacobian_numba(0.0, dummy_y, base_config)
+    print("Pre-compilation finished successfully.\n")
+
     # Instantiate Sweeper
-    sweeper = LayeredParallelSmartSweeper(base_config, t_span, default_u0, t_span_eval, t_res_eval=t_res_eval)
+    sweeper = LayeredParallelSmartSweeper(base_config, t_span, default_u0, t_span_eval, use_3d, use_4d, N_points=N_points)
     
     # Define parameters vectors grid resolution
-    deltas = np.linspace(-1, 1, 5)
-    lthreshold = np.array(lasing_threshold(base_config, deltas=deltas))
-    alphas = np.linspace(0.9*np.min(lthreshold), 2, 5)
+    deltas = np.linspace(-1, 1, 3)[::-1]
+    lthreshold = np.array(lasing_threshold(base_config, deltas=deltas, return_all=False))
+    alphas = np.linspace(0.9*np.min(lthreshold), 1, 3)
     sigmas = np.array([30, 40, 50])
-    
     
     # Execute the Pipeline
     sweep_data = sweeper.run_layered_parallel_sweep(
         p1_name='alpha', p1_vals=alphas,
         p2_name='delta', p2_vals=deltas,
-        p3_name='sigma', p3_vals=sigmas # if lthreshold is given, p1 should be alpha and p2 should be delta
+        p3_name='sigma', p3_vals=sigmas 
     )
     
     # Map the compiled records to a highly accessible 5-dimensional NumPy Array Data Block
     print('\nWriting data...')
     dim = 2 * N + 1
-    state_tensor = np.zeros((len(alphas), len(deltas), len(sigmas), dim, int(abs(t_span_eval[1] - t_span_eval[0])/t_res_eval)))
+    
+    # 1. Flip the delta tracking vector itself so it is written increasing (-1 to 1)
+    deltas_increasing = deltas[::-1]
+    print(deltas_increasing)
+    # 2. Preallocate tensors matching the clean, increasing grid shapes
+    state_tensor = np.zeros((len(alphas), len(deltas), len(sigmas), dim, N_points))
     roots_tensor = np.full((len(alphas), len(deltas), len(sigmas), 3, dim), np.nan)
     eigvals_tensor = np.full((len(alphas), len(deltas), len(sigmas), 3, dim), np.nan, dtype=complex)
     eigvecs_tensor = np.full((len(alphas), len(deltas), len(sigmas), 3, dim, dim), np.nan, dtype=complex)
     above_threshold_tensor = np.full((len(alphas), len(deltas), len(sigmas)), True, dtype=bool)
     exploded_tensor = np.full((len(alphas), len(deltas), len(sigmas)), False, dtype=bool)
 
-    
     idx = 0
     for i in tqdm(range(len(alphas))):
+        if alphas[-1] < alphas[0]:
+            ix = len(alphas) - 1 - i
+        else:
+            ix = i
+
         for j in range(len(deltas)):
+            if deltas[-1] < deltas[0]:
+                jx = len(deltas) - 1 - j
+            else:
+                jx = j
+
             for k in range(len(sigmas)):
+                if sigmas[-1] < sigmas[0]:
+                    kx = len(sigmas) - 1 - k
+                else:
+                    kx = k
+
                 res = sweep_data[idx]
-                state_tensor[i, j, k, :, :] = res['raw_tail']
+                
+                # Store using the clean, increasing delta position (j_inc)
+                state_tensor[ix, jx, kx, :, :] = res['raw_tail']
+                above_threshold_tensor[ix, jx, kx] = res['above_threshold']
+                exploded_tensor[ix, jx, kx] = res['exploded']
 
-                above_threshold_tensor[i,j,k] = res['above_threshold']
-                exploded_tensor[i,j,k] = res['exploded']
-
-                if res['above_threshold'] and not res['exploded'] and len(res['roots']) > 0:
+                if res['above_threshold'] and not res['exploded'] and res['roots'] is not None and len(res['roots']) > 0:
                     num_found = len(res['roots'])
-                    
-                    # Assign the found data up to the actual count; remaining slots stay NaN
-                    roots_tensor[i, j, k, :num_found, :] = res['roots']
-                    eigvals_tensor[i, j, k, :num_found, :] = res['eigvals']
-                    eigvecs_tensor[i, j, k, :num_found, :, :] = res['eigvecs']
+                    roots_tensor[ix, jx, kx, :num_found, :] = res['roots']
+                    eigvals_tensor[ix, jx, kx, :num_found, :] = res['eigvals']
+                    eigvecs_tensor[ix, jx, kx, :num_found, :, :] = res['eigvecs']
 
                 idx += 1
 
-    # Save to disk
-    filename = f'sweep_results_N={N}.npz'
+    # --- Save to disk using the sorted parameter matrices ---
+    filename = f'./results/sweep_results_N={N}.npz'
+    time = np.linspace(t_span_eval[0], t_span_eval[1], N_points)
 
-    time = np.linspace(t_span_eval[0], t_span_eval[1], int(Dt_eval/t_res_eval))
-
-    np.savez_compressed(filename, time=time, 
-                        alphas=alphas, deltas=deltas, sigmas=sigmas, states=state_tensor,
-                        roots=roots_tensor, eigvals=eigvals_tensor, eigvecs=eigvecs_tensor,
-                        above_threshold=above_threshold_tensor, exploded=exploded_tensor)
+    np.savez_compressed(
+        filename, 
+        time=time, 
+        alphas=alphas, 
+        deltas=deltas_increasing,  # CRITICAL: Save the inverted sorted vector
+        sigmas=sigmas, 
+        states=state_tensor,
+        roots=roots_tensor, 
+        eigvals=eigvals_tensor, 
+        eigvecs=eigvecs_tensor,
+        above_threshold=above_threshold_tensor, 
+        exploded=exploded_tensor
+    )
     
     print(f'Successfully saved simulation outputs to {filename}')
+    print(f'Total number of simulations : {exploded_tensor.size}')
+    print(f'Number of failed simulations: {np.sum(exploded_tensor)}')
 
+    failed_indices = np.argwhere(exploded_tensor == True)
 
-    print(f'total number of simulations : {exploded_tensor.size}')
-    print(f'number of failed simulations: {np.sum(exploded_tensor)}')
+    if len(failed_indices) > 0:
+        print("\n=== STEP-ZERO DERIVATIVE AUDIT ===")
+        ix, jx, kx = failed_indices[0]
+        
+        v1, v2, v3 = alphas[ix], deltas[jx], sigmas[kx]
+        config = base_config
+        config['alpha'] = v1
+        config['delta'] = v2
+        config['sigma'] = v3
+        print(f"Testing failed parameters: alpha={v1}, delta={v2}, sigma={v3}")
+        
+        # Evaluate the derivative function manually at t=0
+        initial_derivatives = system(0.0, default_u0, config, use_3d=use_3d, use_4d=use_4d)
+        initial_derivatives = np.array(initial_derivatives)
+        
+        print(f"Are there any NaNs in the initial derivative? {np.isnan(initial_derivatives).any()}")
+        print(f"Are there any Infs in the initial derivative? {np.isinf(initial_derivatives).any()}")
+        print(f"Min derivative value: {np.min(initial_derivatives)}")
+        print(f"Max derivative value: {np.max(initial_derivatives)}")
+        
+        # Let's see which specific equations are breaking
+        print("\nFirst 5 dx/dt derivatives:", initial_derivatives[:5])
+        print("First 5 dy/dt derivatives:", initial_derivatives[N:N+5])
+        print("dz/dt derivative:", initial_derivatives[-1])

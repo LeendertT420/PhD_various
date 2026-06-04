@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from scipy.integrate import quad
 from scipy.special import jn, jn_zeros
 from tqdm import tqdm
-from itertools import combinations_with_replacement
+from itertools import combinations_with_replacement, permutations
 
 
 plot = False
@@ -21,34 +21,43 @@ def integrand_chi_ijk(u, zi, zj, zk):
     ratio_i = jn(0, zi * u) / jn(0, zi)
     ratio_j = jn(0, zj * u) / jn(0, zj)
     ratio_k = jn(0, zk * u) / jn(0, zk)
-    return (4/3) * ratio_i * ratio_j * ratio_k * u
+    return 4 * ratio_i * ratio_j * ratio_k * u
+
+def integrand_chi_ijkl(u, zi, zj, zk, zl):
+    ratio_i = jn(0, zi * u) / jn(0, zi)
+    ratio_j = jn(0, zj * u) / jn(0, zj)
+    ratio_k = jn(0, zk * u) / jn(0, zk)
+    ratio_l = jn(0, zl * u) / jn(0, zl)
+    return 20/3 * ratio_i * ratio_j * ratio_k * ratio_l * u
 
 # -----------------------------------------------------------------------------
 # 3. Compute the Tensors
 # -----------------------------------------------------------------------------
 print("Computing tensors...")
+print(r"$\chi_{ijk}$")
 chi_ijk = np.zeros((N, N, N))
 
 for i, j, k in tqdm(combinations_with_replacement(range(N), 3), total=int(N*(N+1)*(N+2)/6)):
     val, _ = quad(integrand_chi_ijk, 0, 1, args=(zeta[i], zeta[j], zeta[k]))
 
-    chi_ijk[i, j, k] = val
-    chi_ijk[i, k, j] = val
-    chi_ijk[j, i, k] = val
-    chi_ijk[j, k, i] = val
-    chi_ijk[k, i, j] = val
-    chi_ijk[k, j, i] = val
+    for p in set(permutations((i, j, k))):
+        chi_ijk[p] = val
 
-# -----------------------------------------------------------------------------
-# 4. Compute Lambda_i Vector
-# -----------------------------------------------------------------------------
-print("Computing Lambda_i structural vector...")
+print(r"$\chi_{ijkl}$")
+chi_ijkl = np.zeros((N, N, N, N))
+
+for i, j, k, l in tqdm(combinations_with_replacement(range(N), 4), total=int(N * (N + 1) * (N + 2) * (N + 3) / 24)):
+    val, _ = quad(integrand_chi_ijkl, 0, 1, args=(zeta[i], zeta[j], zeta[k], zeta[l]))
+    
+    for p in set(permutations((i, j, k, l))):
+        chi_ijkl[p] = val
 
 
 # -----------------------------------------------------------------------------
 # 5. Save All Data to .npy Files
 # -----------------------------------------------------------------------------
 np.save('./tensors/chi_ijk.npy', chi_ijk)
+np.save('./tensors/chi_ijkl.npy', chi_ijkl)
 print("Data successfully saved to .npy files.\n")
 
 # -----------------------------------------------------------------------------

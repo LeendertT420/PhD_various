@@ -11,8 +11,8 @@ PARAM_ORDER = ["alpha", "delta", "sigma"]
 # =====================================================================
 # DATA DISCOVERY PIPELINE
 # =====================================================================
-data = np.load('sweep_results_N=15.npz')
-print('KANKER:', data.keys)
+data = np.load('./results/sweep_results_N=5.npz')
+
 
 param_vectors = {
     "alpha": data['alphas'],
@@ -22,8 +22,6 @@ param_vectors = {
 states = data['states']          # Shape: (len_p1, len_p2, len_p3, 2N+1, num_steps)
 above_thresh = data['above_threshold']
 exploded = data['exploded']
-print(exploded)
-
 
 # Dense pad array collection checks for stability tracking
 has_stability_data = 'eigvals' in data
@@ -38,6 +36,8 @@ N = (total_vars - 1) // 2
 # Assume a default dt sampling rate based on your main script construction
 t_real = data['time']
 dt = np.mean(np.diff(t_real))
+
+freq_spectrum = np.sqrt(mu_spectrum(N)) / 2/np.pi
 
 # =====================================================================
 # CANVAS AND 2X2 GRID ARCHITECTURE
@@ -62,8 +62,9 @@ def extract_hyper_slice(tensor, indices_dict):
 current_slice = extract_hyper_slice(states, init_indices)
 
 # --- PANEL 1: TIME SERIES INITIALIZATION ---
-lines = [ax_time.plot(t_real, current_slice[i, :], label=f'$x_{i+1}$')[0] for i in range(N)]
+lines = [ax_time.plot(t_real, current_slice[i, :], label=f'$x_{i+1}$', alpha=0.3)[0] for i in range(N)]
 z_line, = ax_time.plot(t_real, current_slice[2*N, :], 'k--', linewidth=1.5, label='Global $z$')
+X_line, = ax_time.plot(t_real, np.sum(current_slice[:N,:], axis=0), 'k', linewidth=1.5, label='Global $X$')
 ax_time.set_xlabel('Time ($t$)')
 ax_time.set_ylabel('Amplitude')
 ax_time.grid(True)
@@ -80,10 +81,14 @@ D_mesh, A_mesh = np.meshgrid(np.linspace(d_grid[0], d_grid[-1], 200), np.linspac
 #ax_plane.plot(np.linspace(d_grid[0], d_grid[-1], 100), z_crit * (np.linspace(d_grid[0], d_grid[-1], 100)**2 + 1.0), 'b--', label='Lasing Threshold')
 # Dynamic location target marker
 target_dot, = ax_plane.plot(param_vectors["delta"][init_indices["delta"]], param_vectors["alpha"][init_indices["alpha"]], 'ro', markersize=8, label='Current State')
+bif_upper, = ax_plane.plot(param_vectors["delta"], upper_boundary(N, param_vectors["delta"]), 'k', linewidth=1.5, label='Bifurcation boundary')
+bif_lower, = ax_plane.plot(param_vectors["delta"], lower_boundary(N, param_vectors["delta"]), 'k', linewidth=1.5)
 ax_plane.set_xlabel(r'Detuning ($\delta$)')
 ax_plane.set_ylabel(r'Pump ($\alpha$)')
 ax_plane.set_title(r'Parameter Landscape $(\delta, \alpha)$')
 ax_plane.legend(loc='lower right', fontsize='small')
+ax_plane.set_xlim(param_vectors["delta"][0], param_vectors["delta"][-1])
+ax_plane.set_ylim(param_vectors["alpha"][0], param_vectors["alpha"][-1])
 ax_plane.grid(True)
 
 # --- PANEL 3: COMPLEX EIGENVALUE PLANE ---
@@ -97,9 +102,11 @@ ax_complex.grid(True)
 
 # --- PANEL 4: SPECTRAL FOURIER POWER SPECTRUM ---
 fft_line, = ax_fft.plot([], [], color='purple', linewidth=1.5)
+spectrum = ax_fft.vlines(freq_spectrum, ymin=0, ymax=1, color='grey', alpha=0.5)
 ax_fft.set_xlabel('Frequency ($\omega$)')
 ax_fft.set_ylabel('Power Spectral Density')
 ax_fft.set_title(r'FFT Spectrum of Total Displacement $\sum x_i$')
+ax_fft.set_xlim(0, 2*freq_spectrum[-1] -freq_spectrum[-2])
 ax_fft.grid(True)
 
 # =====================================================================
@@ -108,6 +115,7 @@ ax_fft.grid(True)
 sliders = {}
 for idx, name in enumerate(PARAM_ORDER):
     vec = param_vectors[name]
+    print(vec[0], vec[-1])
     ax_pos = plt.axes([0.15, 0.16 - (idx * 0.045), 0.7, 0.025])
     latex_label = rf'$\alpha$' if name == 'alpha' else (rf'$\delta$' if name == 'delta' else rf'$\sigma$')
     sliders[name] = Slider(ax=ax_pos, label=latex_label, valmin=vec[0], valmax=vec[-1], valinit=vec[init_indices[name]], valstep=vec)
@@ -159,19 +167,20 @@ def update_canvas(val):
         # 1. Update Trajectory Lines
         for i in range(N):
             lines[i].set_ydata(c_slice[i, :])
+
+        X = np.sum(c_slice[0:N, :], axis=0)
         z_line.set_ydata(c_slice[2*N, :])
+        X_line.set_ydata(X)
         ax_time.relim()
         ax_time.autoscale_view()
         
-        # 2. Compute and Update Fast Fourier Transform
-        total_displacement = np.sum(c_slice[0:N, :], axis=0)
-        # Apply Hanning window to prevent edge leak artifacts across small sample slices
-        windowed_signal = total_displacement * np.hanning(num_time_steps)
-        fft_vals = np.abs(np.fft.rfft(windowed_signal))
+
+        fft_vals = np.abs(np.fft.rfft(X-np.mean(X)))
         freqs = np.fft.rfftfreq(num_time_steps, d=dt)
         
         fft_line.set_data(freqs, fft_vals)
-        ax_fft.relim()
+        spectrum = ax_fft.vlines(freq_spectrum, ymin=0, ymax=np.max(fft_vals), color='grey', alpha=0.5)
+        ax_fft.set_ylim(0, np.max(fft_vals))
         ax_fft.autoscale_view()
         
         # 3. Update Eigenvalue Scatter Points (If tracked and logged)
