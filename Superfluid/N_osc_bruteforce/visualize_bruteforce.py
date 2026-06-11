@@ -16,10 +16,10 @@ umap_coords_grid = None
 
 
 N = 15
-sigma_val = 50
+sigma_val = 60
 
-raw_filename = f'./results/sweep_results_N={N}_sigma={int(sigma_val)}.npz'
-metrics_filename = f'./results/sweep_results_N={N}_sigma={int(sigma_val)}_metrics.npz'
+raw_filename = f'C:\\Users\\lion_remote\\Documents\\Geert\\results\\sweep_results_N={N}_sigma={sigma_val}.npz'
+metrics_filename = f'C:\\Users\\lion_remote\\Documents\\Geert\\results\\sweep_results_N={N}_sigma={sigma_val}_metrics.npz'
 
 # =====================================================================
 # DATA DISCOVERY PIPELINE
