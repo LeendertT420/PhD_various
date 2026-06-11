@@ -52,11 +52,13 @@ params = {
         'N': N0,
         'sigma': 20,
         'tau': 1.0,
-        'alpha': 0,
+        'alpha': .5,
         'delta': 0,
         'gamma': np.full(N0, 0.05),
         'mu': mu_spectrum(N0),
-        'chi': np.load('./tensors/chi_ijk.npy'),
+        'xi': np.ones(N0),
+        'chi_ijk': np.load('./tensors/chi_ijk.npy'),
+        'chi_ijkl': np.load('./tensors/chi_ijkl.npy')
     }
 
 
@@ -273,7 +275,7 @@ def toggle_cmap(label, mesh, cbar):
 # ============================================================
 # UPDATE FUNCTION
 # ============================================================
-def update(val, update_solver=False, update_thresholds=False):
+def update(val, update_cmaps=True, update_solver=False, update_thresholds=False):
 
     if verbose: print("Updating...")
 
@@ -287,8 +289,9 @@ def update(val, update_solver=False, update_thresholds=False):
     params['sigma'] = sS.val
     params['N'] = N
     params['mu'] = mu_spectrum(N)
+    params['xi'] = np.ones(N)
     params['gamma'] = np.full(N, gamma)
-
+    print(fixed_points_num(params))
     T = sTime.val
 
     x0 = sx0.val
@@ -304,10 +307,54 @@ def update(val, update_solver=False, update_thresholds=False):
     bif_upper.set_data(deltas, upper_boundary(N, deltas))
     bif_lower.set_zorder(10)
     bif_upper.set_zorder(10)
+    # --------------------------------------------------------
+    # BIFURCATION HEATMAP
+    # --------------------------------------------------------
+    if update_cmaps:
+        for i in range(N_alpha):
+            for j in range(N_delta):
+                params_temp = params.copy()
+                params_temp['alpha'] = alphas[i]
+                params_temp['delta'] = deltas[j]
+
+                fixed_points = fixed_points_num(params_temp, num_tries=100)
+                #print(N*fixed_points_0th_order(params_temp)[0])
+                #print(np.sum(fixed_points_num(params_temp)[0][:N]))
+                #print('____')
+                if len(fixed_points) == 1:
+                    #print(fixed_points_0th_order(params_temp))
+                    #print(fixed_points) 
+                    Z[j, i] = np.sum(fixed_points[0][:N])
+                    #Z[j, i] = fixed_points_0th_order(params_temp)[0]
+                elif len(fixed_points) > 1:
+                    fixed_points = np.array(fixed_points)
+                    #print(N*fixed_points_0th_order(params_temp)[0])
+                    #print(np.sum(fixed_points[np.argmax(fixed_points[:,0])][:N]))
+                    Z[j, i] = np.sum(fixed_points[np.argmax(fixed_points[:,0])][:N])
+                else:
+                    Z[j, i] = 0
+                #print('____')
+            
+            deltas_eff_calc = Z[:, i] + deltas
+            print(deltas_eff_calc)
+            for j in range(N_delta):
+                Z_eff[j, i] = Z[np.argmin(deltas_eff_calc-deltas_eff[j]), i]
+
+        mesh.set_array(Z.ravel())
+        mesh.set_clim(Z.min(), Z.max())
+        cbar.update_normal(mesh)
+
+        mesh_eff.set_array(Z_eff.ravel())
+        mesh_eff.set_clim(Z_eff.min(), Z_eff.max())
+        cbar_eff.update_normal(mesh_eff)
+
+
+    
+    # --------------------------------------------------------
+    # BIFURCATION CURVES
+    # --------------------------------------------------------
     if update_thresholds:
-        pass
-    '''
-        thresholds = lasing_threshold(N, deltas, tau, mus, gammas)
+        thresholds = lasing_threshold(params, deltas)
 
         if len(thresholds) != 0:
             for i, line in enumerate(lasing_lines):
@@ -316,10 +363,13 @@ def update(val, update_solver=False, update_thresholds=False):
                 else:
                     line.set_data([], [])
 
-            
+            bif_lower.set_data(deltas, lower_boundary(N, deltas))
+            bif_upper.set_data(deltas, upper_boundary(N, deltas))
+            bif_lower.set_zorder(10)
+            bif_upper.set_zorder(10)
 
 
-            thresholds_eff = lasing_threshold(N, deltas, tau, mus, gammas,
+            thresholds_eff = lasing_threshold(params, deltas,
                                             as_func_off='delta_eff',
                                             delta_effs=deltas_eff)
 
@@ -334,20 +384,22 @@ def update(val, update_solver=False, update_thresholds=False):
                 line.set_data([], [])
                 line_eff.set_data([], [])
 
-    delta_temp = deltas_eff - N*np.max(z_star(N, alpha, delta))
+    fixed_point = np.max(fixed_points_num(params))
+    delta_temp = deltas_eff - N*fixed_point
     bif_lower_eff.set_data(deltas_eff, lower_boundary(N, delta_temp))
     bif_upper_eff.set_data(deltas_eff, upper_boundary(N, delta_temp))
     bif_lower_eff.set_zorder(10)
-    bif_upper_eff.set_zorder(10)'''
+    bif_upper_eff.set_zorder(10)
 
         
 
     point.set_data([params['delta']], [params['alpha']])
 
-    '''point_eff.set_data(
-        [N * np.max(z_star_numba(N, alpha, delta)) + delta],
-        [alpha]
-        )'''
+    point_eff.set_data(
+        [N * fixed_point + params['delta']],
+        [params['alpha']]
+        )
+
 
     # --------------------------------------------------------
     # EIGENVALUES
@@ -532,7 +584,7 @@ def update(val, update_solver=False, update_thresholds=False):
 # CONNECT SLIDERS
 # ============================================================
 sA.on_changed(lambda val: update(val,
-                                 update_solver=True,))
+                                 update_solver=True))
 sD.on_changed(lambda val: update(val,
                                  update_solver=True))
 sN.on_changed(lambda val: update(val,

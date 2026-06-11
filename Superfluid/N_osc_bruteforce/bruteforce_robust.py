@@ -168,14 +168,23 @@ class LayeredParallelSmartSweeper:
                 results.append(res)
                 
         return results
+    
+    def clear_history(self):
+        '''Flushes the historical states to free up RAM between separate sigma runs.'''
+        self.history_coords = []
+        self.history_states = []
 
 
 # =====================================================================
 # 3. PIPELINE EXECUTION ENGINE
 # =====================================================================
+# =====================================================================
+# 3. PIPELINE EXECUTION ENGINE
+# =====================================================================
 if __name__ == '__main__':
-    N = 15
+    import gc # Import garbage collector for explicit RAM flushing
 
+    N = 15
     use_3d = True
     use_4d = True
 
@@ -193,17 +202,14 @@ if __name__ == '__main__':
     default_u0 = np.concatenate([
         np.random.uniform(-0.5, 0.5, N),
         np.zeros(N),                     
-        [0.1]])
+        [0.1]
+    ])
     
     # Precompute time evaluation boundaries
     Dt_sim = 1000.0
-
     Dt_eval = 2*np.pi*25 / np.sqrt(base_config['mu'][0])
-
     t_span = (0.0, Dt_sim + Dt_eval)
-
     t_span_eval = (Dt_sim, Dt_sim + Dt_eval)
-
     N_points = int(10*25*np.sqrt(base_config['mu'][-1]/base_config['mu'][0]))
 
     # =====================================================================
@@ -219,113 +225,103 @@ if __name__ == '__main__':
     sweeper = LayeredParallelSmartSweeper(base_config, t_span, default_u0, t_span_eval, use_3d, use_4d, N_points=N_points)
     
     # Define parameters vectors grid resolution
-    deltas = np.linspace(-4, 3, 300)[::-1]
+    deltas = np.linspace(-5, 3, 100)[::-1]
     lthreshold = np.array(lasing_threshold(base_config, deltas=deltas, return_all=False))
-    alphas = np.linspace(0, 2, 300)
-    sigmas = np.arange(10, 100, 5)
+    alphas = np.linspace(0, 6, 100)
+    sigmas = np.array([50, 75]) #np.arange(40, 60, 20)
     
-    # Execute the Pipeline
-    sweep_data = sweeper.run_layered_parallel_sweep(
-        p1_name='alpha', p1_vals=alphas,
-        p2_name='delta', p2_vals=deltas,
-        p3_name='sigma', p3_vals=sigmas 
-    )
-    
-    # Map the compiled records to a highly accessible 5-dimensional NumPy Array Data Block
-    print('\nWriting data...')
     dim = 2 * N + 1
-    
-    # 1. Flip the delta tracking vector itself so it is written increasing (-1 to 1)
     deltas_increasing = deltas[::-1]
-    print(deltas_increasing)
-    # 2. Preallocate tensors matching the clean, increasing grid shapes
-    state_tensor = np.zeros((len(alphas), len(deltas), len(sigmas), dim, N_points))
-    roots_tensor = np.full((len(alphas), len(deltas), len(sigmas), 3, dim), np.nan)
-    eigvals_tensor = np.full((len(alphas), len(deltas), len(sigmas), 3, dim), np.nan, dtype=complex)
-    eigvecs_tensor = np.full((len(alphas), len(deltas), len(sigmas), 3, dim, dim), np.nan, dtype=complex)
-    above_threshold_tensor = np.full((len(alphas), len(deltas), len(sigmas)), True, dtype=bool)
-    exploded_tensor = np.full((len(alphas), len(deltas), len(sigmas)), False, dtype=bool)
+    time_array = np.linspace(t_span_eval[0], t_span_eval[1], N_points)
 
-    idx = 0
-    for i in tqdm(range(len(alphas))):
-        if alphas[-1] < alphas[0]:
-            ix = len(alphas) - 1 - i
-        else:
-            ix = i
+    # Ensure results directory exists
+    os.makedirs('./results', exist_ok=True)
 
-        for j in range(len(deltas)):
-            if deltas[-1] < deltas[0]:
-                jx = len(deltas) - 1 - j
-            else:
-                jx = j
+    # =====================================================================
+    # CHUNKED EXECUTION: Loop over Sigma to constrain RAM
+    # =====================================================================
+    for k, sigma in enumerate(sigmas):
+        print(f"\n=======================================================")
+        print(f"Sweeping parameter space for sigma = {sigma} ({k+1}/{len(sigmas)})")
+        print(f"=======================================================")
+        
+        # Execute Pipeline for a SINGLE sigma value
+        sweep_data = sweeper.run_layered_parallel_sweep(
+            p1_name='alpha', p1_vals=alphas,
+            p2_name='delta', p2_vals=deltas,
+            p3_name='sigma', p3_vals=[sigma], # Isolate to current sigma
+            lthreshold=lthreshold
+        )
+        
+        print(f'\nAllocating and writing data for sigma={sigma}...')
+        
+        # 1. Preallocate tensors for THIS SIGMA ONLY (Removing the sigma dimension)
+        state_tensor = np.zeros((len(alphas), len(deltas), dim, N_points))
+        roots_tensor = np.full((len(alphas), len(deltas), 3, dim), np.nan)
+        eigvals_tensor = np.full((len(alphas), len(deltas), 3, dim), np.nan, dtype=complex)
+        eigvecs_tensor = np.full((len(alphas), len(deltas), 3, dim, dim), np.nan, dtype=complex)
+        above_threshold_tensor = np.full((len(alphas), len(deltas)), True, dtype=bool)
+        exploded_tensor = np.full((len(alphas), len(deltas)), False, dtype=bool)
 
-            for k in range(len(sigmas)):
-                if sigmas[-1] < sigmas[0]:
-                    kx = len(sigmas) - 1 - k
-                else:
-                    kx = k
+        # 2. Map data to memory block
+        idx = 0
+        for i in tqdm(range(len(alphas)), desc="Mapping Arrays"):
+            ix = len(alphas) - 1 - i if alphas[-1] < alphas[0] else i
+
+            for j in range(len(deltas)):
+                jx = len(deltas) - 1 - j if deltas[-1] < deltas[0] else j
 
                 res = sweep_data[idx]
                 
-                # Store using the clean, increasing delta position (j_inc)
-                state_tensor[ix, jx, kx, :, :] = res['raw_tail']
-                above_threshold_tensor[ix, jx, kx] = res['above_threshold']
-                exploded_tensor[ix, jx, kx] = res['exploded']
+                state_tensor[ix, jx, :, :] = res['raw_tail']
+                above_threshold_tensor[ix, jx] = res['above_threshold']
+                exploded_tensor[ix, jx] = res['exploded']
 
                 if res['above_threshold'] and not res['exploded'] and res['roots'] is not None and len(res['roots']) > 0:
                     num_found = len(res['roots'])
-                    roots_tensor[ix, jx, kx, :num_found, :] = res['roots']
-                    eigvals_tensor[ix, jx, kx, :num_found, :] = res['eigvals']
-                    eigvecs_tensor[ix, jx, kx, :num_found, :, :] = res['eigvecs']
+                    roots_tensor[ix, jx, :num_found, :] = res['roots']
+                    eigvals_tensor[ix, jx, :num_found, :] = res['eigvals']
+                    eigvecs_tensor[ix, jx, :num_found, :, :] = res['eigvecs']
 
                 idx += 1
 
-    # --- Save to disk using the sorted parameter matrices ---
-    filename = f'./results/sweep_results_N={N}.npz'
-    time = np.linspace(t_span_eval[0], t_span_eval[1], N_points)
+        # 3. Save chunk to disk
+        filename = f'./results/sweep_results_N={N}_sigma={sigma}.npz'
+        np.savez_compressed(
+            filename, 
+            time=time_array, 
+            alphas=alphas, 
+            deltas=deltas_increasing,  
+            sigma=sigma, # Save individual scalar
+            states=state_tensor,
+            roots=roots_tensor, 
+            eigvals=eigvals_tensor, 
+            eigvecs=eigvecs_tensor,
+            base_config=base_config,
+            above_threshold=above_threshold_tensor, 
+            exploded=exploded_tensor
+        )
+        
+        print(f'Saved chunk to {filename}')
+        
+        # 4. Optional Error Audit for this chunk
+        failed_indices = np.argwhere(exploded_tensor == True)
+        if len(failed_indices) > 0:
+            print(f"Audit: {len(failed_indices)} failed simulations in this chunk.")
+            # Your audit logic can be kept here if you want to inspect step-zeros
 
-    np.savez_compressed(
-        filename, 
-        time=time, 
-        alphas=alphas, 
-        deltas=deltas_increasing,  # CRITICAL: Save the inverted sorted vector
-        sigmas=sigmas, 
-        states=state_tensor,
-        roots=roots_tensor, 
-        eigvals=eigvals_tensor, 
-        eigvecs=eigvecs_tensor,
-        base_config=base_config,
-        above_threshold=above_threshold_tensor, 
-        exploded=exploded_tensor
-    )
-    
-    print(f'Successfully saved simulation outputs to {filename}')
-    print(f'Total number of simulations : {exploded_tensor.size}')
-    print(f'Number of failed simulations: {np.sum(exploded_tensor)}')
-
-    failed_indices = np.argwhere(exploded_tensor == True)
-
-    if len(failed_indices) > 0:
-        print("\n=== STEP-ZERO DERIVATIVE AUDIT ===")
-        ix, jx, kx = failed_indices[0]
+        # 5. AGGRESSIVE RAM FLUSH
+        # Delete local heavy references
+        del sweep_data
+        del state_tensor
+        del roots_tensor
+        del eigvals_tensor
+        del eigvecs_tensor
+        del above_threshold_tensor
+        del exploded_tensor
         
-        v1, v2, v3 = alphas[ix], deltas[jx], sigmas[kx]
-        config = base_config
-        config['alpha'] = v1
-        config['delta'] = v2
-        config['sigma'] = v3
-        print(f"Testing failed parameters: alpha={v1}, delta={v2}, sigma={v3}")
+        # Clear sweeper hot-start memory to prevent accumulating old states
+        sweeper.clear_history() 
         
-        # Evaluate the derivative function manually at t=0
-        initial_derivatives = system(0.0, default_u0, config, use_3d=use_3d, use_4d=use_4d)
-        initial_derivatives = np.array(initial_derivatives)
-        
-        print(f"Are there any NaNs in the initial derivative? {np.isnan(initial_derivatives).any()}")
-        print(f"Are there any Infs in the initial derivative? {np.isinf(initial_derivatives).any()}")
-        print(f"Min derivative value: {np.min(initial_derivatives)}")
-        print(f"Max derivative value: {np.max(initial_derivatives)}")
-        
-        # Let's see which specific equations are breaking
-        print("\nFirst 5 dx/dt derivatives:", initial_derivatives[:5])
-        print("First 5 dy/dt derivatives:", initial_derivatives[N:N+5])
-        print("dz/dt derivative:", initial_derivatives[-1])
+        # Force garbage collector to release memory to OS immediately
+        gc.collect()

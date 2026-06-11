@@ -48,6 +48,7 @@ N_min, N_max = 1, 20
 alpha0, delta0 = 0, 0
 tau0 = 1.0
 N0 = 2
+N_prev = N0
 T0 = 100
 
 mus = mu_spectrum(N0)
@@ -56,9 +57,7 @@ gammas = np.full(N0, gamma)
 # ============================================================
 # INITIAL CONDITIONS
 # ============================================================
-x0 = np.zeros(N0)
-y0 = np.zeros(N0)
-z0 = 0.0
+y0 = np.zeros(2*N0+1)
 
 # ============================================================
 # FIGURE LAYOUT
@@ -263,6 +262,7 @@ def toggle_cmap(label, mesh, cbar):
 # UPDATE FUNCTION
 # ============================================================
 def update(val, update_cmap=False, update_cmap_eff=True, update_solver=False, update_thresholds=False):
+    global y0
 
     if verbose: print("Updating...")
 
@@ -307,7 +307,7 @@ def update(val, update_cmap=False, update_cmap_eff=True, update_solver=False, up
     # BIFURCATION CURVES
     # --------------------------------------------------------
     if update_thresholds:
-        thresholds = lasing_threshold(N, deltas, tau, mus, gammas)
+        thresholds = lasing_threshold(N, deltas, tau, mus, gammas, num_scan_points=250)
 
         if len(thresholds) != 0:
             for i, line in enumerate(lasing_lines):
@@ -465,9 +465,11 @@ def update(val, update_cmap=False, update_cmap_eff=True, update_solver=False, up
     # TIME EVOLUTION
     # --------------------------------------------------------
     if update_solver:
-        y0 = np.zeros(2 * N + 1)
-        t_eval = np.linspace(0, T, 5000)
+        if len(y0) != 2*N + 1:
+            y0 = np.zeros(2*N + 1)
 
+        t_eval = np.linspace(0, T, 5000)
+        print(y0)
         sol = solve_ivp(
             lambda t, X: system(t, X, alpha, delta, mus, gammas, tau),
             (0, T), y0, t_eval=t_eval
@@ -501,7 +503,7 @@ def update(val, update_cmap=False, update_cmap_eff=True, update_solver=False, up
         ax7.set_xlim(T,T+20)
         ax7.set_ylim(np.min(X), np.max(X))
         
-
+        y0 = sol.y[:,-1]
 
         fft_values = np.fft.rfft(X-np.mean(X))
         frequencies = np.fft.rfftfreq(len(X), d=200/5000)
@@ -529,11 +531,14 @@ def update(val, update_cmap=False, update_cmap_eff=True, update_solver=False, up
 
     fig.canvas.draw_idle()
 
+    
+
 # ============================================================
 # CONNECT SLIDERS
 # ============================================================
+
 sA.on_changed(lambda val: update(val,
-                                 update_solver=True,))
+                                 update_solver=True))
 sD.on_changed(lambda val: update(val,
                                  update_solver=True))
 sN.on_changed(lambda val: update(val,
@@ -548,6 +553,7 @@ sTime.on_changed(lambda val: update(val,
 
 
 # initial draw
+
 update(None, update_cmap=True, update_cmap_eff=True, update_solver=True, update_thresholds=True)
 
 plt.show()

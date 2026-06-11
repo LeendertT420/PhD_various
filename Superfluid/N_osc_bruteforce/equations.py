@@ -98,16 +98,18 @@ def system(t : float,
     x_dot = y
 
     # --- nonlinear interaction terms ---
+    if use_4d:
+        use_3d = True
+        interaction_4D = np.einsum('ijkl,j,k,l->i', params['chi_ijkl'][:N, :N, :N, :N], x, x, x)
+    else:
+        interaction_4D = np.zeros(N)
+
     if use_3d:
         interaction_3D = np.einsum('ijk,j,k->i', params['chi_ijk'][:N, :N, :N], x, x)
     else:
         interaction_3D = np.zeros(N)
         
-    if use_4d:
-        interaction_4D = np.einsum('ijkl,j,k,l->i', params['chi_ijkl'][:N, :N, :N, :N], x, x, x)
-    else:
-        interaction_4D = np.zeros(N)
-
+    
     # --- y equations ---
     y_dot = (
         -params['gamma'] * y
@@ -217,6 +219,10 @@ def system_numba(t : float,
     and handles solve_ivp compatibility cleanly.
     '''
     N = params['N']
+    if use_4d:
+        use_3d = True
+    if not use_3d:
+        use_4d = False
     
     return _system_numba_core(
         t=t,
@@ -383,15 +389,17 @@ def Jacobian(t : float,
     '''
     N = params['N']
     mu = params['mu']
-    sigma = params['sigma']
     tau = params['tau']
-    
-    # Safely extract sliced tensors to prevent indexing issues
-    chi_ijk = params['chi_ijk'][:N, :N, :N]
-    chi_ijkl = params['chi_ijkl'][:N, :N, :N, :N]
 
-    if use_optical_coupling:
-        dL_val = dL(x, params)
+    use_4d = use_4d and use_3d
+
+    if use_4d:
+        chi_ijkl = params['chi_ijkl'][:N, :N, :N, :N]
+
+    if use_3d:
+        sigma = params['sigma']
+        chi_ijk = params['chi_ijk'][:N, :N, :N]
+
 
     # --- Block matrices ---
 
@@ -409,9 +417,11 @@ def Jacobian(t : float,
 
     # L row block
     if use_optical_coupling:
+        dL_val = dL(x, params)
         L_row = np.full((1, N), dL_val / tau)
     else:
         L_row = np.zeros((1, N))
+        
 
     # A block initialization
     A = np.zeros((N, N))
@@ -628,6 +638,7 @@ def find_pure_imag_crossings(params : dict[str, int | float | NDArray[np.float64
         J = J0.copy()
         J[-1, 0:N] = np.full((1, N), dL/tau)
         eigvals = np.linalg.eigvals(J)
+       
 
         # IMPORTANT: ordering is by imaginary part (physical spectrum)
         idx = np.argsort(np.imag(eigvals))
@@ -691,7 +702,7 @@ def lasing_threshold(params : dict[str, int | float | NDArray[np.float64]],
     dL_min = (1-np.sqrt(1+d_max**2))/2
     dL_max = 0
 
-    dL_sols = find_pure_imag_crossings(params, dL_min, dL_max, num_scan_points=num_scan_points)
+    dL_sols = N*find_pure_imag_crossings(params, dL_min, dL_max, num_scan_points=num_scan_points)
     if verbose: print(f'\tdL solutions: {dL_sols} {np.shape(dL_sols)}')
 
     if len(dL_sols) == 0:

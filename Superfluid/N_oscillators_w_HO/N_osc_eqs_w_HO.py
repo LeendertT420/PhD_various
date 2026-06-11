@@ -1,31 +1,55 @@
 import warnings
+from typing import Any, List, Literal
+
 import numpy as np
-import sympy as sp
-from scipy.special import jn_zeros
-from scipy.optimize import root_scalar
+from numpy.typing import NDArray
 from numba import njit
 
-from scipy.integrate import solve_ivp
-from scipy.optimize import root
+from scipy.optimize import root, root_scalar
+from scipy.special import jn_zeros
 
 warnings.filterwarnings('ignore')  # Suppress all warnings
 
 verbose = False
-
-np.set_printoptions(precision=5)
-
+np.set_printoptions(precision=3)
 
 
-def system(t, state, params):
-    """
-    Computes the ODE system
+# -----------------------------
+# Frequency spectrum
+# -----------------------------
+
+def zeta(i : int) -> float:
+    return jn_zeros(1, i)[-1]
+
+
+def mu_spectrum(i : int) -> NDArray[np.float64]:
+    return ( jn_zeros(1, i) / jn_zeros(1, 1) )**2
+
+
+def mu_spectrum_harmonic(i : int) -> NDArray[np.float64]:
+    return np.sqrt(np.arange(1, i+1))
+
+
+
+# -----------------------------
+# System
+# -----------------------------
+
+def system(t : float,
+           state : NDArray[np.float64],
+           params : dict[str, int | float | NDArray[np.float64]],
+           use_3d : bool = True,
+           use_4d : bool = True) -> NDArray[np.float64]:
+    '''
+    Computes the ODE system with conditional quadratic and cubic non-linear mode interactions.
 
         x_dot_i = y_i
 
         y_dot_i = -gamma_i y_i
                   - mu_i x_i
                   + mu_i z
-                  + (mu_i / sigma) * sum_{j,k} chi_ijk x_j x_k
+                  + [optional] (mu_i / sigma) * sum_{j,k} chi_ijk x_j x_k
+                  - [optional] (mu_i / sigma^2) * sum_{j,k,l} chi_ijkl x_j x_k x_l
 
         z_dot = (1/tau) * (
                     alpha / ((delta + sum_i x_i)^2 + 1)
@@ -41,28 +65,29 @@ def system(t, state, params):
         State vector:
             state = [x_1,...,x_N, y_1,...,y_N, z]
 
+    N : int
+        Number of modes
     gamma : ndarray, shape (N,)
     mu : ndarray, shape (N,)
-    chi : ndarray, shape (N,N,N)
-    sigma : float
+    tau : float
     alpha : float
     delta : float
-    tau : float
+    sigma : float
+    chi_ijk : ndarray, shape (N,N,N)
+        3D cubic mode interaction tensor
+    chi_ijkl : ndarray, shape (N,N,N,N)
+        4D quartic mode interaction tensor
+    use_3d : bool, default True
+        Flag to include or ignore the cubic potential interaction (3D tensor contraction)
+    use_4d : bool, default True
+        Flag to include or ignore the quartic potential interaction (4D tensor contraction)
 
     Returns
     -------
     dstate_dt : ndarray, shape (2N + 1,)
-    """
+    '''
 
     N = params['N']
-    mu = params['mu']
-    gamma = params['gamma']
-    sigma = params['sigma']
-    alpha = params['alpha']
-    delta = params['delta']
-    tau = params['tau']
-    chi = params['chi'][:N,:N,:N]
-
 
     # unpack state
     x = state[:N]
@@ -72,25 +97,33 @@ def system(t, state, params):
     # --- x equations ---
     x_dot = y
 
-    # --- nonlinear interaction term ---
-    #
-    # interaction[i] = sum_{j,k} chi[i,j,k] x_j x_k
-    #
-    interaction = np.einsum('ijk,j,k->i', chi, x, x)
+    # --- nonlinear interaction terms ---
+    if use_4d:
+        use_3d = True
+        interaction_4D = np.einsum('ijkl,j,k,l->i', params['chi_ijkl'][:N, :N, :N, :N], x, x, x)
+    else:
+        interaction_4D = np.zeros(N)
 
+    if use_3d:
+        interaction_3D = np.einsum('ijk,j,k->i', params['chi_ijk'][:N, :N, :N], x, x)
+    else:
+        interaction_3D = np.zeros(N)
+        
+    
     # --- y equations ---
     y_dot = (
-        -gamma * y
-        -mu * x
-        +mu * z
-        +(mu / sigma) * interaction
+        -params['gamma'] * y
+        -params['mu'] * x
+        +params['mu'] * params['xi'] * z
+        +(params['mu']  / params['sigma'] ) * interaction_3D
+        -(params['mu']  / (params['sigma'] **2)) * interaction_4D
     )
 
     # --- z equation ---
     z_dot = (
-        1.0 / tau
+        1.0 / params['tau'] 
     ) * (
-        alpha / ((delta + np.sum(x))**2 + 1.0)
+        params['alpha']  / ((params['delta']  + np.sum(x))**2 + 1.0)
         - z
     )
 
@@ -104,20 +137,139 @@ def system(t, state, params):
     return dstate_dt
 
 
+@njit(fastmath=True)
+def _system_numba_core(t : float,
+                       state : NDArray[np.float64],
+                       N : int,
+                       gamma : NDArray[np.float64],
+                       mu : NDArray[np.float64],
+                       tau : float,
+                       alpha : float,
+                       delta : float,
+                       sigma : float,
+                       chi_ijk : NDArray[np.float64],
+                       chi_ijkl : NDArray[np.float64],
+                       xi : NDArray[np.float64],
+                       use_3d : bool = True,
+                       use_4d : bool = True) -> NDArray[np.float64]:
+    '''
+    Core numerical backend compiled to raw machine code.
+    '''
+    # Unpack state
+    x = state[0:N]
+    y = state[N:2*N]
+    z = state[2*N]
+    
+    # Preallocate derivatives
+    derivatives = np.empty(2 * N + 1)
+    dx = derivatives[0:N]
+    dy = derivatives[N:2*N]
+    
+    # 1. dx_i/dt = y_i
+    dx[:] = y
+    
+    # 2. Compute the interaction terms
+    tensor_term = np.zeros(N)
+    sigma_sq = sigma * sigma
+    
+    for i in range(N):
+        # --- 3D Tensor Contraction (Cubic Energy Term) ---
+        s_3d = 0.0
+        if use_3d:
+            for j in range(N):
+                s_3d += chi_ijk[i, j, j] * x[j] * x[j]
+                for k in range(j + 1, N):
+                    s_3d += 2.0 * chi_ijk[i, j, k] * x[j] * x[k]
+                
+        # --- 4D Tensor Contraction (Quartic Energy Term) ---
+        s_4d = 0.0
+        if use_4d:
+            for j in range(N):
+                s_4d += chi_ijkl[i, j, j, j] * x[j] * x[j] * x[j]
+                
+                for k in range(j + 1, N):
+                    s_4d += 3.0 * chi_ijkl[i, j, j, k] * x[j] * x[j] * x[k]
+                    s_4d += 3.0 * chi_ijkl[i, j, k, k] * x[j] * x[k] * x[k]
+                    
+                    for l in range(k + 1, N):
+                        s_4d += 6.0 * chi_ijkl[i, j, k, l] * x[j] * x[k] * x[l]
+                    
+        # Combine non-linear forces with their respective scaling factors
+        tensor_term[i] = (mu[i] / sigma) * s_3d - (mu[i] / sigma_sq) * s_4d
 
-def fixed_points_num(params, num_tries=30):
-    """
+    # 3. dy_i/dt
+    for i in range(N):
+        dy[i] = -gamma[i]*y[i] - mu[i]*x[i] + mu[i]*xi[i]*z + tensor_term[i]
+        
+    # 4. dz/dt
+    sum_x = np.sum(x)
+    dz = (1.0 / tau) * ((alpha / ((delta + sum_x)**2 + 1.0)) - z)
+    derivatives[2*N] = dz
+    
+    return derivatives
+
+
+def system_numba(t : float,
+                 state : NDArray[np.float64],
+                 params : dict[str, int | float | NDArray[np.float64]],
+                 use_3d : bool = True,
+                 use_4d : bool = True) -> NDArray[np.float64]:
+    '''
+    User-facing ODE function that accepts the params dictionary 
+    and handles solve_ivp compatibility cleanly.
+    '''
+    N = params['N']
+    if use_4d:
+        use_3d = True
+    if not use_3d:
+        use_4d = False
+    
+    return _system_numba_core(
+        t=t,
+        state=state,
+        N=N,
+        gamma=params['gamma'],
+        mu=params['mu'],
+        tau=params['tau'],
+        alpha=params['alpha'],
+        delta=params['delta'],
+        sigma=params['sigma'],
+        chi_ijk=params['chi_ijk'][:N, :N, :N],
+        chi_ijkl=params['chi_ijkl'][:N, :N, :N, :N],
+        xi=params['xi'],
+        use_3d=use_3d,
+        use_4d=use_4d
+    )
+
+
+
+# -----------------------------
+# Fixed points
+# -----------------------------
+
+def fixed_points_num(params : dict[str, int | float | NDArray[np.float64]],
+                     num_tries : int = 30,
+                     tolerance : float = 1e-10,
+                     use_3d : bool = True,
+                     use_4d : bool = True,
+                     numba : bool = True) -> list[float]:
+    '''
     Finds fixed points numerically and filters them based on physical bounds:
     0 < x_i < sigma  and  0 < z < sigma (with y_i = 0).
-    """
+    '''
     N = params['N']
-    sigma = params['sigma']
     
     def steady_state_objective(vars_xz):
         x_val = vars_xz[0:N]
         z_val = vars_xz[-1]
         U = np.concatenate([x_val, np.zeros(N), [z_val]])
-        derivs = system(0, U, params)
+
+        if numba:
+            system_func = system_numba
+        elif not numba:
+            system_func = system
+
+        derivs = system_func(0, U, params, use_3d=use_3d, use_4d=use_4d)
         return np.concatenate([derivs[N:2*N], [derivs[-1]]])
 
     valid_solutions = []
@@ -127,12 +279,12 @@ def fixed_points_num(params, num_tries=30):
         
         res = root(steady_state_objective, initial_guess, method='lm')
         
-        if res.success and np.linalg.norm(res.fun) < 1e-10:
+        if res.success and np.linalg.norm(res.fun) < tolerance:
             sol_x = res.x[0:N]
             sol_z = res.x[-1]
             
-            if np.all(sol_x >= 0) and np.all(sol_x < 10*sigma):
-                if (sol_z >= 0) and (sol_z < 10*sigma):
+            if np.all(sol_x >= 0) and np.all(sol_x < 2*params['sigma']):
+                if (sol_z >= 0) and (sol_z < 2*params['sigma']):
                     full_fixed_point = np.concatenate([sol_x, np.zeros(N), [sol_z]])
                     
                     if not any(np.allclose(full_fixed_point, sol, atol=1e-8) for sol in valid_solutions):
@@ -141,8 +293,7 @@ def fixed_points_num(params, num_tries=30):
     return valid_solutions
 
 
-
-def fixed_points_0th_order(params):
+def fixed_points_0th_order(params : dict[str, int | float | NDArray[np.float64]]) -> list[float]:
     N = params['N']
     d = params['delta']
     a = params['alpha']
@@ -153,16 +304,15 @@ def fixed_points_0th_order(params):
     return roots
 
 
-def fixed_points_1st_order(params):
+def fixed_points_1st_order(params : dict[str, int | float | NDArray[np.float64]]) -> list[float]:
     points_0th_order = fixed_points_0th_order(params)
 
     N = params['N']
     d = params['delta']
-    chi = params['chi'][:N,:N,:N]
-    Lambda = np.sum(chi, axis=(1, 2))
+    Lambda = np.sum(params['chi_ijk'][:N,:N,:N], axis=(1, 2))
     eps = 1/params['sigma']
 
-    Lambda_bar = np.sum(chi)
+    Lambda_bar = np.sum(params['chi_ijk'][:N,:N,:N])
 
     points_1st_order = []
     for x in points_0th_order:
@@ -172,50 +322,47 @@ def fixed_points_1st_order(params):
         z_star = x - eps * x**2 * dL_bar
 
         points_1st_order.append(np.concatenate([x_star, [z_star]]))
+
     return points_1st_order
 
 
 
+# -----------------------------
+# Bifurcation boundaries
+# -----------------------------
 
-# -----------------------------
-# bifurcation boundaries
-# -----------------------------
-def lower_boundary(N, d):
+def lower_boundary(N : int,
+                   d : float | NDArray[np.float64]) -> float | NDArray[np.float64]:
     s = np.sqrt(d**2 - 3)
     return -2/27 * (s - 2*d)**2 * (s + d) / N
 
-def upper_boundary(N, d):
+
+def upper_boundary(N : int,
+                   d : float | NDArray[np.float64]) -> float | NDArray[np.float64]:
     s = np.sqrt(d**2 - 3)
     return  2/27 * (s + 2*d)**2 * (s - d) / N
 
 
-def zeta(i):
-    return jn_zeros(1, i)[-1]
 
-def mu_spectrum(i):
-    return ( jn_zeros(1, i) / jn_zeros(1, 1) )**2
+# -----------------------------
+# Jacobian
+# -----------------------------
 
-def mu_spectrum_harmonic(i):
-    return np.sqrt(np.arange(1, i+1))
-
-
-
-def dL_star(x_star, params):
+def dL(x : float | NDArray[np.float64],
+       params : dict[str, int | float | NDArray[np.float64]]) -> float | NDArray[np.float64]:
     N = params['N']
-    alpha = params['alpha']
-    tau = params['tau']
-    delta = params['delta']
-
-    x = x_star[:N]
-    q = np.sum(x) + delta
-
-    return (-2*alpha/tau) * q / ( q**2 + 1 )**2
+    x = x[:N]
+    q = np.sum(x) + params['delta']
+    return (-2*params['alpha']/params['tau']) * q / ( q**2 + 1 )**2
 
 
-
-
-def construct_jacobian(x_star, params, modecoupling=True, opticalcoupling=True):
-    """
+def Jacobian(t : float,
+             x : float,
+             params : dict[str, int | float | NDArray[np.float64]],
+             use_3d : bool = True,
+             use_4d : bool = True,
+             use_optical_coupling : bool = True) -> NDArray[np.float64]:
+    '''
     Construct the block Jacobian matrix
 
         J = [[0, I, 0],
@@ -224,42 +371,35 @@ def construct_jacobian(x_star, params, modecoupling=True, opticalcoupling=True):
 
     Parameters
     ----------
-    gamma : (N,) array_like
-        Vector γ_i
-
-    mu : (N,) array_like
-        Vector μ_i
-
     x_star : (N,) array_like
         Fixed point vector x*_i
-
-    chi : (N, N, N) array_like
-        Tensor χ_ijk
-
-    sigma : float
-        Scalar σ
-
-    tau : float
-        Scalar τ
-
-    dL : (N,) array_like
-        Vector of partial derivatives:
-            dL_j = ∂L*/∂x_j / τ
+    params : dict
+        Dictionary containing keys 'N', 'mu', 'gamma', 'chi_ijk', 'chi_ijkl', 'sigma', 'tau'
+    use_3d : bool, default True
+        Whether to include the 3D tensor chi_ijk derivative in the A matrix
+    use_4d : bool, default True
+        Whether to include the 4D tensor chi_ijkl derivative in the A matrix
+    opticalcoupling : bool, default True
+        Whether to include the dL/tau optical coupling block
 
     Returns
     -------
     J : (2N+1, 2N+1) ndarray
         Full Jacobian matrix
-    """
+    '''
     N = params['N']
     mu = params['mu']
-    gamma = params['gamma']
-    chi = params['chi'][:N,:N,:N]
-    sigma = params['sigma']
     tau = params['tau']
 
-    if opticalcoupling:
-        dL = dL_star(x_star, params)
+    use_4d = use_4d and use_3d
+
+    if use_4d:
+        chi_ijkl = params['chi_ijkl'][:N, :N, :N, :N]
+
+    if use_3d:
+        sigma = params['sigma']
+        chi_ijk = params['chi_ijk'][:N, :N, :N]
+
 
     # --- Block matrices ---
 
@@ -270,32 +410,41 @@ def construct_jacobian(x_star, params, modecoupling=True, opticalcoupling=True):
     I = np.eye(N)
 
     # Gamma block
-    Gamma = -np.diag(gamma)
+    Gamma = -np.diag(params['gamma'])
 
     # mu column block
     mu_col = mu.reshape(N, 1)
 
     # L row block
-    if opticalcoupling:
-        L_row = np.full((1, N), dL/tau)
-    elif not opticalcoupling:
-        L_row = np.full((1, N), 0)
+    if use_optical_coupling:
+        dL_val = dL(x, params)
+        L_row = np.full((1, N), dL_val / tau)
+    else:
+        L_row = np.zeros((1, N))
+        
 
-    # A block
+    # A block initialization
     A = np.zeros((N, N))
 
-    if modecoupling:
-        for i in range(N):
-            for j in range(N):
-                interaction_sum = np.sum(chi[i, j, :] * x_star[:N])
-
-                A[i, j] = (
-                    -mu[i] * (i == j)
-                    + (2.0 * mu[i] / sigma) * interaction_sum
-                )
-    elif not modecoupling:
-        for i in range(N):
-            A[i, i] = -mu[i]
+    # Evaluate the structural coordinate stiffness contributions
+    for i in range(N):
+        for j in range(N):
+            # 1. Base linear frequency term (diagonal)
+            A[i, j] = -mu[i] * (i == j)
+            
+            # 2. 3D interaction tensor contribution
+            if use_3d:
+                # sum_k chi_ijk * x_k
+                interaction_sum_3d = np.sum(chi_ijk[i, j, :] * x[:N])
+                A[i, j] += (2.0 * mu[i] / sigma) * interaction_sum_3d
+                
+            # 3. 4D interaction tensor contribution
+            if use_4d:
+                # sum_{k,l} chi_ijkl * x_k * x_l
+                # Outer product matrix x_k * x_l maps directly onto the last two dimensions
+                x_outer = np.outer(x[:N], x[:N])
+                interaction_sum_4d = np.sum(chi_ijkl[i, j, :, :] * x_outer)
+                A[i, j] -= (3.0 * mu[i] / (sigma**2)) * interaction_sum_4d
 
     # --- Assemble full Jacobian ---
 
@@ -310,19 +459,186 @@ def construct_jacobian(x_star, params, modecoupling=True, opticalcoupling=True):
     return J
 
 
-# -----------------------------
-# lasing threshold
-# -----------------------------
-def find_pure_imag_crossings(params, dL_min, dL_max, num_scan_points=250):
+@njit(fastmath=True)
+def _jacobian_numba_core(t: float, 
+                         x : NDArray[np.float64],
+                         N : int,
+                         gamma : NDArray[np.float64],
+                         mu : NDArray[np.float64],
+                         tau : float,
+                         sigma : float,
+                         chi_ijk : NDArray[np.float64],
+                         chi_ijkl : NDArray[np.float64],
+                         xi : NDArray[np.float64],
+                         dL_val : float,
+                         use_3d : bool = True,
+                         use_4d : bool = True,
+                         use_optical_coupling : bool = True) -> NDArray[np.float64]:
+    '''
+    Core numerical backend for Jacobian assembly compiled to raw machine code.
+    '''
+    # Preallocate the complete full Jacobian matrix
+    total_dim = 2 * N + 1
+    J = np.zeros((total_dim, total_dim))
+    
+    # Define clean, zero-allocation views onto the block segments of J
+    # Top Row Block: [ O_block , I_block , zero_col ]
+    I_block = J[0:N, N:2*N]
+    
+    # Middle Row Block: [ A_block , Gamma_block , mu_col ]
+    A_block = J[N:2*N, 0:N]
+    Gamma_block = J[N:2*N, N:2*N]
+    mu_col = J[N:2*N, 2*N:2*N+1]
+    
+    # Bottom Row Block: [ L_row , zero_row , constant_cell ]
+    L_row = J[2*N:2*N+1, 0:N]
+    
+    # --- Populating the trivial block matrix sections ---
+    # 1. Identity block
+    for i in range(N):
+        I_block[i, i] = 1.0
+        
+    # 2. Gamma block (damping)
+    for i in range(N):
+        Gamma_block[i, i] = -gamma[i]
+        
+    # 3. Mu column block
+    for i in range(N):
+        mu_col[i, 0] = mu[i]*xi[i]
+        
+    # 4. L row block & final cell
+    if use_optical_coupling:
+        for j in range(N):
+            L_row[0, j] = dL_val / tau
+            
+    J[2*N, 2*N] = -1.0 / tau
+    
+    # --- Populating the coordinate stiffness block (A) ---
+    sigma_sq = sigma * sigma
+    
+    for i in range(N):
+        for j in range(N):
+            # Base linear frequency term (diagonal element matching)
+            if i == j:
+                A_val = -mu[i]
+            else:
+                A_val = 0.0
+            
+            # 3D interaction tensor contribution
+            if use_3d:
+                interaction_sum_3d = 0.0
+                for k in range(N):
+                    interaction_sum_3d += chi_ijk[i, j, k] * x[k]
+                A_val += (2.0 * mu[i] / sigma) * interaction_sum_3d
+                
+            # 4D interaction tensor contribution
+            if use_4d:
+                interaction_sum_4d = 0.0
+                for k in range(N):
+                    for l in range(N):
+                        interaction_sum_4d += chi_ijkl[i, j, k, l] * x[k] * x[l]
+                A_val -= (3.0 * mu[i] / sigma_sq) * interaction_sum_4d
+                
+            A_block[i, j] = A_val
+            
+    return J
 
-    J0 = construct_jacobian(None, params, modecoupling=False, opticalcoupling=False)
 
+def Jacobian_numba(t : float, 
+                   x : NDArray[np.float64],
+                   params : dict[str, int | float | NDArray[np.float64]],
+                   use_3d : bool = True,
+                   use_4d : bool = True,
+                   use_optical_coupling : bool = True) -> NDArray[np.float64]:
+    '''
+    User-facing Jacobian function that safely handles the params dictionary
+    and invokes the compiled Numba numerical engine.
+    '''
+    N = params['N']
+    
+    # Compute the optical derivative scalar if flag is toggled
+    if use_optical_coupling:
+        # Assuming dL(x, params) computes your analytical partial float value
+        dL_val = dL(x, params)
+    else:
+        dL_val = 0.0
+        
+    return _jacobian_numba_core(
+        t=t,
+        x=x,
+        N=N,
+        gamma=params['gamma'],
+        mu=params['mu'],
+        tau=params['tau'],
+        sigma=params['sigma'],
+        chi_ijk=params['chi_ijk'][:N, :N, :N],
+        chi_ijkl=params['chi_ijkl'][:N, :N, :N, :N],
+        xi=params['xi'],
+        dL_val=dL_val,
+        use_3d=use_3d,
+        use_4d=use_4d,
+        use_optical_coupling=use_optical_coupling
+    )
+
+
+def compute_eigs(params : dict[str, int | float | NDArray[np.float64]],
+                 numba : bool = False,
+                 use_3d : bool = True,
+                 use_4d : bool = True,
+                 use_optical_coupling : bool = True,
+                 verbose : bool = False) -> tuple[NDArray[np.float64],
+                                                  NDArray[np.float64],
+                                                  NDArray[np.float64]]:
+    
+    roots = fixed_points_num(params, use_3d=use_3d, use_4d=use_4d, numba=numba)
+
+    eigvals = []
+    eigvecs = []
+
+    if verbose: print('EIGENVALUES AND EIGENVECTORS:')
+
+    for i, root in enumerate(roots):
+
+        if numba:
+            J_func = Jacobian_numba
+        else:
+            J_func = Jacobian
+            
+        vals, vecs = np.linalg.eig(J_func(0.0, root, params, use_3d=use_3d, use_4d=use_4d,
+                                          use_optical_coupling=use_optical_coupling))
+        eigvals.append(vals)
+        eigvecs.append(vecs)
+
+        if verbose:
+            print(f'\troot {i}')
+            for j, (val, vec) in enumerate(zip(vals, vecs)):
+                print(f'\t\tvalue {j}:{val}')
+                print(f'\t\tvector {j}:{vec}')
+
+    return np.array(roots), np.array(eigvals), np.array(eigvecs)
+
+
+
+# -----------------------------
+# Lasing threshold
+# -----------------------------
+
+def find_pure_imag_crossings(params : dict[str, int | float | NDArray[np.float64]],
+                             dL_min : float,
+                             dL_max : float,
+                             num_scan_points : int = 250) -> NDArray[np.float64]:
+
+    N = params['N']
     tau = params['tau']
 
+    J0 = Jacobian(0, np.zeros(2*N+1), params, use_3d=False, use_4d=False, use_optical_coupling=False)
+
     def eigen_decomposition(dL):
+        N = int((np.shape(J0)[0]-1)/2)
         J = J0.copy()
         J[-1, 0:N] = np.full((1, N), dL/tau)
         eigvals = np.linalg.eigvals(J)
+       
 
         # IMPORTANT: ordering is by imaginary part (physical spectrum)
         idx = np.argsort(np.imag(eigvals))
@@ -366,20 +682,27 @@ def find_pure_imag_crossings(params, dL_min, dL_max, num_scan_points=250):
     return np.unique(np.round(roots, 10))
 
 
-
-def lasing_threshold(params, deltas=None, num_scan_points=250, as_func_off='delta', delta_effs=None):
+def lasing_threshold(params : dict[str, int | float | NDArray[np.float64]],
+                     deltas : NDArray[np.float64] = None,
+                     num_scan_points : int = 250,
+                     as_func_off : Literal['delta', 'delta_eff'] = 'delta',
+                     delta_effs : NDArray[np.float64] = None,
+                     return_all : bool = True,
+                     verbose : bool = False) -> list[NDArray[np.float64]]:
+    
     N = params['N']
-    d = params['delta']
 
     if isinstance(deltas, (np.ndarray, list)):
         d_max = np.max(np.abs([deltas[0], deltas[-1]]))
+        d = deltas
     else:
+        d = params['delta']
         d_max = d
 
     dL_min = (1-np.sqrt(1+d_max**2))/2
     dL_max = 0
 
-    dL_sols = find_pure_imag_crossings(params, dL_min, dL_max, num_scan_points=num_scan_points)
+    dL_sols = N*find_pure_imag_crossings(params, dL_min, dL_max, num_scan_points=num_scan_points)
     if verbose: print(f'\tdL solutions: {dL_sols} {np.shape(dL_sols)}')
 
     if len(dL_sols) == 0:
@@ -414,22 +737,25 @@ def lasing_threshold(params, deltas=None, num_scan_points=250, as_func_off='delt
     if verbose: print(f'\tz solutions shape:{np.shape(z_sols)}')    
     if verbose: print(f'\tthresholds shape:{np.shape(thresholds)}')
     
-    thresholds_filtered = thresholds#filter_arrays(thresholds)
+    thresholds_filtered = _filter_arrays(thresholds)
     if verbose: print(f'\tthresholds shape (after filtering):{np.shape(thresholds_filtered)}')
     if len(thresholds_filtered) == 0:
         return []
 
     thresholds_sorted = sorted(thresholds_filtered, key=lambda a: np.min(a))
 
-    return thresholds_sorted
+    if return_all:
+        return thresholds_sorted
+    elif not return_all:
+        return thresholds_sorted[0]
 
 
-def filter_arrays(arr_list):
-    """
+def _filter_arrays(arr_list : list[NDArray[np.float64]]) -> list[NDArray[np.float64]]:
+    '''
     Remove arrays that:
     - are entirely negative
     - consist only of NaN values
-    """
+    '''
     filtered = []
 
     for arr in arr_list:
@@ -446,189 +772,3 @@ def filter_arrays(arr_list):
         filtered.append(arr)
 
     return filtered
-
-
-
-# -----------------------------
-# Jacobian
-# -----------------------------
-
-
-
-
-def extract_real_entries(arr, epsilon=1e-5):
-    """
-    Return all entries whose imaginary part is smaller than epsilon.
-    Returned values are converted to real floats.
-    """
-    arr = np.asarray(arr, dtype=complex)
-
-    mask = np.abs(arr.imag) < epsilon
-
-    return arr.real[mask]
-
-
-
-
-
-def compute_eigs(params):
-    roots = fixed_points_num(params)
-
-    eigvals = []
-    eigvecs = []
-    if verbose: print('EIGENVALUES AND EIGENVECTORS:')
-    for i, root in enumerate(roots):
-
-        dL = dL_star(root, params)
-        vals, vecs = np.linalg.eig(construct_jacobian(root, params, dL))
-        eigvals.append(vals)
-        eigvecs.append(vecs)
-        if verbose: print(f'\troot {i}')
-        if verbose:
-            for j, (val, vec) in enumerate(zip(vals, vecs)):
-                print(f'\t\tvalue {j}:{val}')
-                print(f'\t\tvector {j}:{vec}')
-
-    return np.array(roots), np.array(eigvals), np.array(eigvecs)
-
-
-
-# -----------------------------
-# SYSTEM
-# -----------------------------
-
-
-
-def project_onto_plane(x, v1, v2):
-    """
-    Project vector x onto the plane spanned by v1 and v2.
-
-    Parameters:
-        x, v1, v2 : array-like (shape: (n,))
-    
-    Returns:
-        projection of x onto span{v1, v2}
-    """
-    # Stack vectors as columns of A (n x 2 matrix)
-    A = np.column_stack((v1, v2))
-    
-    # Compute projection: A (A^T A)^{-1} A^T x
-    ATA_inv = np.linalg.inv(A.T @ A)
-    projection = A @ ATA_inv @ A.T @ x
-    
-    return projection
-
-
-def project_onto_line(x, v):
-    """
-    Project vector x onto the line spanned by vector v.
-
-    Parameters
-    ----------
-    x : array-like
-        Vector to be projected
-    v : array-like
-        Direction vector of the line
-
-    Returns
-    -------
-    numpy.ndarray
-        Projection of x onto span(v)
-    """
-    x = np.asarray(x)
-    v = np.asarray(v)
-
-    return (np.dot(x, v) / np.dot(v, v)) * v
-
-
-def transform_matrix(N):
-    """
-    Construct the (2N+1)x(2N+1) transformation matrix for
-
-    (x1,y1,...,xN,yN,z) -> (X,Y,u2,v2,...,uN,vN,z)
-
-    where
-        X = (1/N) sum_i x_i
-        Y = (1/N) sum_i y_i
-        u_i = x_i - X
-        v_i = y_i - Y
-    """
-    M = np.zeros((2*N + 1, 2*N + 1))
-
-    # Row for X
-    for i in range(N):
-        M[0, 2*i] = 1
-
-    # Row for Y
-    for i in range(N):
-        M[1, 2*i + 1] = 1
-
-    # Rows for u_i, v_i (i = 2,...,N)
-    for i in range(1, N):   # zero-based: i=1 corresponds to u2,v2
-        row_u = 2*i
-        row_v = 2*i + 1
-
-        # u_i = x_i - X = x_i - (1/N) sum_j x_j
-        for j in range(N):
-            M[row_u, 2*j] = -1
-        M[row_u, 2*i] = N - 1
-
-        # v_i = y_i - Y = y_i - (1/N) sum_j y_j
-        for j in range(N):
-            M[row_v, 2*j + 1] = -1
-        M[row_v, 2*i + 1] = N - 1
-
-    # z unchanged
-    M[-1, -1] = N
-
-    return M / N
-
-
-def inverse_transform_matrix(N):
-    """
-    Construct the inverse transformation matrix for
-
-    (X,Y,u2,v2,...,uN,vN,z) -> (x1,y1,...,xN,yN,z)
-
-    Returns a (2N+1)x(2N+1) matrix.
-    """
-    M = np.zeros((2*N + 1, 2*N + 1))
-
-    # x1 = X - sum_{i=2}^N u_i
-    M[0, 0] = 1
-    for i in range(1, N):
-        M[0, 2*i] = -1
-
-    # y1 = Y - sum_{i=2}^N v_i
-    M[1, 1] = 1
-    for i in range(1, N):
-        M[1, 2*i + 1] = -1
-
-    # xi = X + ui, yi = Y + vi  for i=2,...,N
-    for i in range(1, N):
-        row_x = 2*i
-        row_y = 2*i + 1
-
-        M[row_x, 0] = 1          # X contribution
-        M[row_x, 2*i] = 1        # ui contribution
-
-        M[row_y, 1] = 1          # Y contribution
-        M[row_y, 2*i + 1] = 1    # vi contribution
-
-    # z unchanged
-    M[-1, -1] = 1
-
-    return M
-            
-
-
-
-
-if __name__ == '__main__':
-    N = 2
-    gs = np.array([1, 1,2, 6, 7, 7])
-    mus = np.array([1, 2,6, 6, 9, 10])
-    a = 1
-    t = 2
-    d = 1
-    z = z_star(N, a, d)[0]

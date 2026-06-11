@@ -93,12 +93,14 @@ def find_pure_imag_crossings(mus, gs, t,
 
 
 def lasing_threshold(N, d, t, mus, gs, num_scan_points=250, as_func_off='delta', delta_effs=None):
+
     if isinstance(d, (np.ndarray, list)):
         d_max = np.max(np.abs([d[0], d[-1]]))
     else:
         d_max = d
 
     dL_min = (1-np.sqrt(1+d_max**2))/2
+
     dL_max = 0
 
     dL_sols = find_pure_imag_crossings(mus, gs, t, dL_min, dL_max, num_scan_points=num_scan_points)
