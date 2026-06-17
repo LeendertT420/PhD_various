@@ -335,10 +335,9 @@ def update(val, update_cmaps=True, update_solver=False, update_thresholds=False)
                     Z[j, i] = 0
                 #print('____')
             
-            deltas_eff_calc = Z[:, i] + deltas
-            print(deltas_eff_calc)
-            for j in range(N_delta):
-                Z_eff[j, i] = Z[np.argmin(deltas_eff_calc-deltas_eff[j]), i]
+
+                for j in range(N_delta):
+                    Z_eff[j, i] = alphas[i] / (deltas_eff[j]**2+1)
 
         mesh.set_array(Z.ravel())
         mesh.set_clim(Z.min(), Z.max())
@@ -383,11 +382,33 @@ def update(val, update_cmaps=True, update_solver=False, update_thresholds=False)
             for line, line_eff in zip(lasing_lines, lasing_lines_eff):
                 line.set_data([], [])
                 line_eff.set_data([], [])
+    '''
+    fixed_points_boundary_lower = []
+    fixed_points_boundary_upper = []
+    low = lower_boundary(N, deltas)
+    low = low[~np.isnan(low)]
+    up = upper_boundary(N, deltas)
+    upp = up[~np.isnan(up)]
+    for d, a_lower, a_upper in zip(deltas[~np.isnan(up)], low, upp):
+        params_temp = params.copy()
+        params_temp['delta'] = d
 
-    fixed_point = np.max(fixed_points_num(params))
-    delta_temp = deltas_eff - N*fixed_point
-    bif_lower_eff.set_data(deltas_eff, lower_boundary(N, delta_temp))
-    bif_upper_eff.set_data(deltas_eff, upper_boundary(N, delta_temp))
+        params_temp['alpha'] = a_lower
+        fixed_points_boundary_lower.append(np.max(np.sum(fixed_points_num(params_temp, num_tries=100)[:N], axis=1)))
+
+        params_temp['alpha'] = a_upper
+        print(np.sum(fixed_points_num(params_temp, num_tries=100)[:N], axis=1))
+        fixed_points_boundary_upper.append(np.max(np.sum(fixed_points_num(params_temp, num_tries=100)[:N], axis=1)))
+
+    deltas_eff_lower = deltas[~np.isnan(up)] + np.array(fixed_points_boundary_lower)
+    deltas_eff_upper = deltas[~np.isnan(up)] + np.array(fixed_points_boundary_upper)
+
+    alpha_eff_lower = np.interp(deltas_eff, deltas_eff_lower, low)
+    alpha_eff_upper = np.interp(deltas_eff, deltas_eff_upper, upp)'''
+
+    #bif_lower_eff.set_data(deltas_eff, alpha_eff_lower)
+    print(-1*(deltas_eff**2+1)**2/deltas_eff/N/2)
+    bif_upper_eff.set_data(deltas_eff, 1*(deltas_eff**2+1)**2/deltas_eff/N/2)
     bif_lower_eff.set_zorder(10)
     bif_upper_eff.set_zorder(10)
 
@@ -395,8 +416,10 @@ def update(val, update_cmaps=True, update_solver=False, update_thresholds=False)
 
     point.set_data([params['delta']], [params['alpha']])
 
+
+    fixed_point = np.sum(fixed_points_num(params_temp, num_tries=100)[:N])
     point_eff.set_data(
-        [N * fixed_point + params['delta']],
+        [fixed_point + params['delta']],
         [params['alpha']]
         )
 
