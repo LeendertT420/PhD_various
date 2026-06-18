@@ -11,7 +11,7 @@ plt.rcParams.update({'axes.xmargin': 0})
 
 N = 15
 sigma = 60
-alpha_target = 1.608#2#0.693
+alpha_target = 1.608#2#0.693#
 delta_target = 2.04#1#-2.73
 i_alpha = int(alpha_target/2*200-1)
 i_delta = int((delta_target+4)/7*250 -1)
@@ -113,7 +113,7 @@ fit_cutoff = 20        # Only fit the linear behavior up to this step
 
 lle, debug_data = nolds.lyap_r(
     amp, 
-    emb_dim=10, 
+    emb_dim=8, 
     lag=None, 
     debug_data=True, 
     trajectory_len=full_trajectory_len, # Track the full curve

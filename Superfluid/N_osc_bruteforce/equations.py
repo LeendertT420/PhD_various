@@ -11,7 +11,7 @@ from scipy.special import jn_zeros
 warnings.filterwarnings('ignore')  # Suppress all warnings
 
 verbose = False
-np.set_printoptions(precision=3)
+#np.set_printoptions(precision=5)
 
 
 # -----------------------------
@@ -341,6 +341,10 @@ def upper_boundary(N : int,
                    d : float | NDArray[np.float64]) -> float | NDArray[np.float64]:
     s = np.sqrt(d**2 - 3)
     return  2/27 * (s + 2*d)**2 * (s - d) / N
+
+
+def cusp(N : int) -> tuple[float, float]:
+    return -np.sqrt(3), 8*np.sqrt(3)/(9*N)
 
 
 
@@ -772,3 +776,92 @@ def _filter_arrays(arr_list : list[NDArray[np.float64]]) -> list[NDArray[np.floa
         filtered.append(arr)
 
     return filtered
+
+
+def _print_dict(dic):
+    for key, val in dic.items():
+        print(f"{key:<10} : {val}")
+
+
+def to_SI(params,
+          rho = 145, # kg/m3
+          rho_s = 145,  # kg/m^3
+          a_vdw = 2.6e-24, # m^5/s^2
+          kappa = 11.45e6, # Hz, FWHM
+          G = 2e16, # Hz/m
+          R = 3e-3, # m
+          beta = 1.5e6,
+          f = 2.818e14, # Hz 
+          kappa_ex = None, # Hz, FWHM
+          verbose = True):
+    
+    if kappa_ex == None:
+        kappa_ex = kappa/2 # assumes critical coupling
+    
+    kappa_rad_HWHM = np.pi*kappa # rad/s, HWHM
+    kappa_ex_rad_HWHM = np.pi*kappa_ex
+    G_rad = 2*np.pi*G
+    omega = 2*np.pi*f
+
+    params_SI = {}
+
+    params_SI['d'] =  params['sigma'] * kappa_rad_HWHM / G_rad
+    c3 = np.sqrt(3*rho_s*a_vdw / (rho * params_SI['d']**3))
+    Omega1 = jn_zeros(1, 1)[0] * c3 / R
+    m0 = np.pi*R**4*rho**2 / (jn_zeros(1, 1)[0]**2 * params_SI['d'] * rho_s)
+
+    params_SI['tau'] = params['tau'] / Omega1 # s
+    params_SI['freqs'] = np.sqrt(params['mu'])/(2*np.pi) * Omega1 # Hz
+    params_SI['masses'] = m0 / params['mu'] # kg
+    params_SI['Gammas'] = params['gamma']/(2*np.pi) * Omega1 # Hz
+    params_SI['detuning'] = kappa*params['delta']/2 # Hz
+    params_SI['power'] = params['alpha'] / (2*beta * kappa_ex_rad_HWHM * G_rad**2 * params_SI['d']**4 / (3*np.pi*a_vdw*rho*omega*kappa_rad_HWHM**3*R**2)) # W
+
+    if verbose:
+        _print_dict(params_SI)
+    
+    return params_SI
+
+
+def to_unitless(params_SI,
+                rho = 145, # kg/m3
+                rho_s = 145,  # kg/m^3
+                a_vdw = 2.6e-24, # m^5/s^2
+                kappa = 11.45e6, # Hz, FWHM
+                G = 2e16, # Hz/m
+                R = 3e-3, # m
+                beta = 1.5e6,
+                f = 2.818e14, # Hz 
+                kappa_ex = None, # Hz, FWHM
+                verbose = True):
+    
+    if kappa_ex == None:
+        kappa_ex = kappa/2 # assumes critical coupling
+    
+    kappa_rad_HWHM = np.pi*kappa # rad/s, HWHM
+    kappa_ex_rad_HWHM = np.pi*kappa_ex
+    G_rad = 2*np.pi*G
+    omega = 2*np.pi*f
+
+    params = {}
+
+    params['sigma'] = params_SI['d'] * G_rad / kappa_rad_HWHM
+    c3 = np.sqrt(3*rho_s*a_vdw / (rho * params_SI['d']**3))
+    Omega1 = jn_zeros(1, 1)[0] * c3 / R
+
+    params['tau'] = params_SI['tau'] * Omega1
+    params['gamma'] = params_SI['Gammas']*(2*np.pi) / Omega1
+    params['delta'] = 2/kappa*params_SI['detuning']
+    params['alpha'] = params_SI['power'] * (2*beta * kappa_ex_rad_HWHM * G_rad**2 * params_SI['d']**4 / (3*np.pi*a_vdw*rho*omega*kappa_rad_HWHM**3*R**2))
+
+    if verbose:
+        _print_dict(params)
+
+    return params
+        
+
+
+
+
+
+    
