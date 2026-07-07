@@ -113,7 +113,7 @@ current_slice = extract_hyper_slice(states, init_indices)
 lines = [ax_time.plot(t_real, current_slice[i, :], label=f'$x_{i+1}$', alpha=0.3)[0] for i in range(N)]
 z_line, = ax_time.plot(t_real, current_slice[2*N, :], 'k--', linewidth=1.5, label='Global $z$')
 X_line, = ax_time.plot(t_real, np.sum(current_slice[:N,:], axis=0), 'k', linewidth=1.5, label='Global $X$')
-ax_time.set_xlabel('Time ($t$)')
+ax_time.set_xlabel(r'Time ($t$)')
 ax_time.set_ylabel('Amplitude')
 ax_time.grid(True)
 ax_time.legend(loc='upper right', fontsize='small')
@@ -156,7 +156,7 @@ ax_complex.grid(True)
 fft_line, = ax_fft.plot([], [], color='purple', linewidth=1.5, zorder=10)
 peaks, = ax_fft.plot([], [], 'ro', markersize=8)
 spectrum = ax_fft.vlines(freq_spectrum, ymin=0, ymax=1, color='grey', alpha=0.5, linewidth=0.5)
-ax_fft.set_xlabel('Frequency ($\omega$)')
+ax_fft.set_xlabel(r'Frequency ($\omega$)')
 ax_fft.set_ylabel('Power Spectral Density')
 ax_fft.set_title(r'FFT Spectrum of Total Displacement $\sum_i x_i$')
 ax_fft.set_xlim(0, 2*freq_spectrum[-1] -freq_spectrum[-2])
@@ -351,7 +351,7 @@ def update_canvas(val):
         fft_line.set_data([], [])
     else:
         fig.patch.set_facecolor('#ffffff')
-        fig.suptitle(f"Superfluid Oscillator Array Control Panel ($\sigma$ = {current_vals['sigma']:.1f})", color='black', fontsize=14, weight='bold')
+        fig.suptitle(rf"Superfluid Oscillator Array Control Panel ($\sigma$ = {current_vals['sigma']:.1f})", color='black', fontsize=14, weight='bold')
         
         # 1. Update Trajectory Lines
         for i in range(N):

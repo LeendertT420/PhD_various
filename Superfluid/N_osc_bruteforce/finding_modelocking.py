@@ -69,7 +69,7 @@ plt.show()
 tspan = (0.0, 1500)
 epsilon = 1e-8
 init1 = sol.y[:,-1]
-init2 = init1 + epsilon*np.random.rand(2*N+1)
+init2 = init1 + epsilon*np.ones(2*N+1)
 Lyapunov = True
 if Lyapunov:
     teval = np.linspace(tspan[0], tspan[1], int(10*tspan[1]*np.sqrt(params['mu'])[-1]/(2*np.pi)))
