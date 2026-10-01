@@ -11,7 +11,7 @@ plot = False
 # -----------------------------------------------------------------------------
 # 1. Setup Parameters and Roots
 # -----------------------------------------------------------------------------
-N = 25  # Number of modes to compute
+N = 20  # Number of modes to compute
 zeta = jn_zeros(1, N)
 
 # -----------------------------------------------------------------------------
@@ -43,6 +43,11 @@ for i, j, k in tqdm(combinations_with_replacement(range(N), 3), total=int(N*(N+1
     for p in set(permutations((i, j, k))):
         chi_ijk[p] = val
 
+for i in range(N):
+    print(f'{i}{i}{i}', chi_ijk[i, i, i])
+
+
+
 print(r"$\chi_{ijkl}$")
 chi_ijkl = np.zeros((N, N, N, N))
 
@@ -51,6 +56,7 @@ for i, j, k, l in tqdm(combinations_with_replacement(range(N), 4), total=int(N *
     
     for p in set(permutations((i, j, k, l))):
         chi_ijkl[p] = val
+
 
 
 # -----------------------------------------------------------------------------

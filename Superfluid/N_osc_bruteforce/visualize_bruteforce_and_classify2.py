@@ -20,6 +20,9 @@ def simulate_and_compute_fft(sigma, alpha, delta, N, base_config_SI):
     params['sigma'] = sigma
     params['alpha'] = alpha
     params['delta'] = delta
+    params['chi_ijk'] = np.load('./tensors/chi_ijk.npy')[:N, :N, :N]
+    params['chi_ijkl'] = np.load('./tensors/chi_ijkl.npy')[:N, :N, :N]
+    params['xi'] = np.ones(N)
 
     X0 = np.concatenate([np.full(N,0), np.full(N, 0), [0]])
     T = 800
@@ -45,7 +48,7 @@ def simulate_and_compute_fft(sigma, alpha, delta, N, base_config_SI):
     return t, X, frequencies, amplitude
 
 
-def load_and_plot_sweep(filepath="bruteforce_sweep_results_N=15.npz"):
+def load_and_plot_sweep(filepath="bruteforce_sweep_results3_N=15.npz"):
     # 1. LOAD COMPRESSED DATA MATRIX
     try:
         data = np.load(filepath, allow_pickle=True)
@@ -81,7 +84,8 @@ def load_and_plot_sweep(filepath="bruteforce_sweep_results_N=15.npz"):
                 elif cls == 'BELOW THRESHOLD':
                     grid_maxfreq[i, j, k] = -2
                 elif cls == 'MODE LOCKED':
-                    grid_maxfreq[i, j, k] = -1
+                    grid_maxfreq[i, j, k] = grid_freqs[i, j, k][np.argmax(grid_amps[i, j, k])]
+                    grid_class[i,j,k] = 'MULTI MODE LASING'
                 elif len(grid_amps[i, j, k]) > 0:
                     grid_maxfreq[i, j, k] = grid_freqs[i, j, k][np.argmax(grid_amps[i, j, k])]
                 else:
@@ -98,7 +102,6 @@ def load_and_plot_sweep(filepath="bruteforce_sweep_results_N=15.npz"):
         'MULTI MODE LASING': 'darkblue',
         'CHAOTIC': 'white',
         'BELOW THRESHOLD': 'black',
-        'MODE LOCKED': 'magenta'
     }
 
     num_classes = len(unique_classes)
@@ -142,7 +145,7 @@ def load_and_plot_sweep(filepath="bruteforce_sweep_results_N=15.npz"):
     
     # Render maps
     im1 = ax1.imshow(init_disc, extent=extent_val, origin='lower', cmap=custom_cmap, norm=norm_discrete, aspect='auto')
-    ax1.set_ylabel(r'$\alpha$', fontsize=11, fontweight='bold')
+    ax1.set_ylabel(r'α', fontsize=11, fontweight='bold')
     ax1.set_title('Classification Map', fontsize=12, pad=10)
     line1_u, = ax1.plot(deltas, upper_boundary(N, deltas), c='k')
     line1_l, = ax1.plot(deltas, lower_boundary(N, deltas), c='k')
@@ -158,8 +161,8 @@ def load_and_plot_sweep(filepath="bruteforce_sweep_results_N=15.npz"):
     ax1.set_xlim(deltas.min(), deltas.max())
 
     # Interactive coordinates marker points
-    current_alpha = (alphas.min() + alphas.max()) / 2.0
-    current_delta = (deltas.min() + deltas.max()) / 2.0
+    current_alpha = 0.44#(alphas.min() + alphas.max()) / 2.0
+    current_delta = -2.5#(deltas.min() + deltas.max()) / 2.0
     cross1, = ax1.plot(current_delta, current_alpha, 'rx', markersize=10, mew=2)
     cross2, = ax2.plot(current_delta, current_alpha, 'rx', markersize=10, mew=2)
 

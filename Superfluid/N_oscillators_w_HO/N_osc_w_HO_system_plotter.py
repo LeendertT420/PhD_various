@@ -45,7 +45,7 @@ N_min, N_max = 1, 20
 # ============================================================
 # INITIAL PARAMETERS
 # ============================================================
-N0 = 2
+N0 = 15
 T0 = 100
 
 params = {
@@ -57,6 +57,8 @@ params = {
         'gamma': np.full(N0, 0.05),
         'mu': mu_spectrum(N0),
         'chi_ijk': np.load('./tensors/chi_ijk.npy'),
+        'chi_ijkl': np.load('./tensors/chi_ijkl.npy'),
+        'xi': np.ones(N0)
     }
 
 # ============================================================

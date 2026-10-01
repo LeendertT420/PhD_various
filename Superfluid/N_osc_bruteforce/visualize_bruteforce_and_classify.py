@@ -1,10 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
-from matplotlib.colors import ListedColormap, BoundaryNorm
+from matplotlib.colors import ListedColormap, BoundaryNorm, Normalize
 from equations import *
 
-def load_and_plot_sweep(filepath="bruteforce_sweep_results_N=15.npz"):
+def load_and_plot_sweep(filepath="bruteforce_sweep_results3_N=15.npz"):
     # 1. LOAD COMPRESSED DATA MATRIX
     try:
         data = np.load(filepath, allow_pickle=True)
@@ -31,32 +31,27 @@ def load_and_plot_sweep(filepath="bruteforce_sweep_results_N=15.npz"):
         for j in range(grid_shape[1]):
             for k in range(grid_shape[2]):
                 cls = grid_class[i, j, k]
-                if cls == 'CHAOTIC':
-                    grid_maxfreq[i, j, k] = -4
-                elif cls == 'NOT CLASSIFIED':
-                    grid_maxfreq[i, j, k] = -1
-                elif cls == 'MODE LOCKED':
-                    grid_maxfreq[i, j, k] = -2
-                elif cls == 'BELOW THRESHOLD':
-                    grid_maxfreq[i, j, k] = -3
-                elif len(grid_amps[i, j, k]) > 0:
+                if cls == 'MODE LOCKED':
+                    grid_class[i, j, k] = 'MULTI MODE LASING'
+                
+                # Assign actual physical peak frequency if active, otherwise 0.0
+                if len(grid_amps[i, j, k]) > 0 and cls not in ['CHAOTIC', 'BELOW THRESHOLD', 'NOT CLASSIFIED']:
                     grid_maxfreq[i, j, k] = grid_freqs[i, j, k][np.argmax(grid_amps[i, j, k])]
                 else:
-                    grid_maxfreq[i, j, k] = -1
+                    grid_maxfreq[i, j, k] = 0.0
 
-    # 3. DEFINE AND ALIGN COLOR MAPPINGS
+    # 3. DEFINE AND ALIGN COLOR MAPPINGS FOR DISCRETE PLOT
     unique_classes = np.unique(classifications)
     class_to_int = {cls: idx for idx, cls in enumerate(unique_classes)}
     grid_int = np.vectorize(class_to_int.get)(grid_class)
 
-    # Core explicit color rules
     state_colors = {
+        'SINGLE MODE LASING': 'lightblue',
+        'MULTI MODE LASING': 'darkblue',
+        'CHAOTIC': 'white',
         'BELOW THRESHOLD': 'black',
-        'MODE LOCKED': 'orange',
-        'CHAOTIC': 'white'
     }
 
-    # Generate custom colors array for original qualitative plot
     num_classes = len(unique_classes)
     base_cmap = plt.get_cmap('tab10', num_classes)
     plot1_colors = []
@@ -71,41 +66,14 @@ def load_and_plot_sweep(filepath="bruteforce_sweep_results_N=15.npz"):
     bounds_discrete = np.arange(num_classes + 1) - 0.5
     norm_discrete = BoundaryNorm(bounds_discrete, num_classes)
 
-    # 4. CONSTRUCT HYBRID COLORMAP FOR PLOT 2
-    code_mapping = {
-        -4: 'CHAOTIC',
-        -3: 'BELOW THRESHOLD',
-        -2: 'MODE LOCKED',
-        -1: 'NOT CLASSIFIED'
-    }
-    
-    disc_colors = []
-    for code in [-4, -3, -2, -1]:
-        cls_name = code_mapping[code]
-        if cls_name in state_colors:
-            disc_colors.append(state_colors[cls_name])
-        elif cls_name in class_to_int:
-            disc_colors.append(base_cmap.colors[class_to_int[cls_name]])
-        else:
-            disc_colors.append((0.5, 0.5, 0.5)) # Fallback
-
-    # Generate boundaries for Plot 2: 4 discrete labels + segmented continuous bins
+    # 4. CONSTRUCT PURE CONTINUOUS LIMITS FOR PLOT 2
     max_freq_val = max(np.max(grid_maxfreq), 1e-5)
-    num_freq_bins = 50
-    freq_bins = np.linspace(0.0, max_freq_val, num_freq_bins + 1)
-    
-    hybrid_bounds = np.concatenate([[-4.5, -3.5, -2.5, -1.5], freq_bins])
-    
-    continuous_cmap = plt.get_cmap('viridis')
-    freq_colors = [continuous_cmap(i / num_freq_bins) for i in range(num_freq_bins)]
-    hybrid_colors = disc_colors + freq_colors
-    
-    freq_cmap = ListedColormap(hybrid_colors)
-    norm_hybrid = BoundaryNorm(hybrid_bounds, len(hybrid_colors))
+    norm_continuous = Normalize(vmin=0.0, vmax=max_freq_val)
+    freq_cmap = plt.get_cmap('viridis')
 
-    # 5. INITIALIZE INTERACTIVE MATPLOTLIB SIDE-BY-SIDE CANVASES
+    # 5. INITIALIZE INTERACTIVE MATPLOTLIB CANVASES
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 7), sharex=True, sharey=True)
-    plt.subplots_adjust(bottom=0.25, wspace=0.25, right=0.88)
+    plt.subplots_adjust(bottom=0.25, left=0.08, right=0.90, wspace=0.35)
 
     def get_slices(sigma_idx):
         slice_discrete = np.fliplr(grid_int[sigma_idx, :, :])
@@ -124,41 +92,35 @@ def load_and_plot_sweep(filepath="bruteforce_sweep_results_N=15.npz"):
     ax1.set_xlabel(r'$\delta$', fontsize=11, fontweight='bold')
     ax1.set_ylabel(r'$\alpha$', fontsize=11, fontweight='bold')
     ax1.set_title('Classification Map', fontsize=12, pad=10)
-    line1_u, = ax1.plot(deltas, upper_boundary(N, deltas), c='k')
-    line1_l, = ax1.plot(deltas, lower_boundary(N, deltas), c='k')
-    lasing_line1, = ax1.plot(deltas, np.zeros_like(deltas), 'r')
+    line1_u, = ax1.plot(deltas, upper_boundary(N, deltas), c='r')
+    line1_l, = ax1.plot(deltas, lower_boundary(N, deltas), c='r')
+    lasing_line1, = ax1.plot(deltas, np.zeros_like(deltas), 'r', ls='--')
 
     # --- PLOT 2: Frequency Mapping ---
     im2 = ax2.imshow(
         init_freq, extent=extent_val, origin='lower',
-        cmap=freq_cmap, norm=norm_hybrid, aspect='auto'
+        cmap=freq_cmap, norm=norm_continuous, aspect='auto'
     )
     ax2.set_xlabel(r'$\delta$', fontsize=11, fontweight='bold')
     ax2.set_title('Dominant Frequency Map', fontsize=12, pad=10)
-    line2_u, = ax2.plot(deltas, upper_boundary(N, deltas), c='k')
-    line2_l, = ax2.plot(deltas, lower_boundary(N, deltas), c='k')
-    lasing_line2, = ax2.plot(deltas, np.zeros_like(deltas), 'r')
+    line2_u, = ax2.plot(deltas, upper_boundary(N, deltas), c='r')
+    line2_l, = ax2.plot(deltas, lower_boundary(N, deltas), c='r')
+    lasing_line2, = ax2.plot(deltas, np.zeros_like(deltas), 'r', ls='--')
 
     ax1.set_ylim(alphas.min(), alphas.max())
     ax1.set_xlim(deltas.min(), deltas.max())
 
     suptitle_text = fig.suptitle(f'Phase Map Projections | Sigma = {sigmas[initial_idx]:.2f}', fontsize=14, y=0.96)
 
-    # 6. COLORBAR ATTACHMENTS WITH CORRECT DISCRETE LABELS
-    cax1 = fig.add_axes([0.43, 0.25, 0.015, 0.58])
+    # 6. COLORBAR ATTACHMENTS WITH CORRECT SPACING
+    cax1 = fig.add_axes([0.45, 0.25, 0.015, 0.58])
     cbar1 = fig.colorbar(im1, cax=cax1, ticks=np.arange(num_classes))
     cbar1.ax.set_yticklabels(unique_classes, fontsize=8)
     cbar1.ax.tick_params(length=0)
 
-    cax2 = fig.add_axes([0.91, 0.25, 0.015, 0.58])
+    cax2 = fig.add_axes([0.92, 0.25, 0.015, 0.58])
     cbar2 = fig.colorbar(im2, cax=cax2)
-    
-    discrete_ticks = [-4.0, -3.0, -2.0, -0.75]
-    continuous_ticks = np.linspace(0.0, max_freq_val, 5).tolist()
-    
-    cbar2.set_ticks(discrete_ticks + continuous_ticks)
-    tick_labels = ['CHAOTIC', 'BELOW THRESHOLD', 'MODE LOCKED', 'NOT CLASSIFIED'] + [f"{val:.2f}" for val in continuous_ticks]
-    cbar2.ax.set_yticklabels(tick_labels, fontsize=8)
+    cbar2.set_label('Frequency', rotation=275, labelpad=10)
 
     # 7. CONSTRUCT THE INTERACTIVE SIGMA SLIDER
     ax_slider = plt.axes([0.20, 0.08, 0.60, 0.04])
@@ -187,6 +149,9 @@ def load_and_plot_sweep(filepath="bruteforce_sweep_results_N=15.npz"):
         
         suptitle_text.set_text(f'Phase Map Projections | Sigma = {sigma:.2f}')
         fig.canvas.draw_idle()
+
+    # Trigger threshold calculation for the initial state before showing the plot
+    update(sigmas[initial_idx])
 
     sigma_slider.on_changed(update)
     plt.show()

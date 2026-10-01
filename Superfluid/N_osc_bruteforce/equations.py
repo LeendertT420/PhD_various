@@ -4,9 +4,10 @@ from typing import Any, List, Literal
 import numpy as np
 from numpy.typing import NDArray
 from numba import njit
+import numba
 
 from scipy.optimize import root, root_scalar
-from scipy.special import jn_zeros
+from scipy.special import jn_zeros, jnp_zeros, jn
 
 warnings.filterwarnings('ignore')  # Suppress all warnings
 
@@ -30,6 +31,30 @@ def mu_spectrum_harmonic(i : int) -> NDArray[np.float64]:
     return np.sqrt(np.arange(1, i+1))
 
 
+def get_bessel_profile(i, N_points):
+    zeta_i = jnp_zeros(0, i)[-1]
+    r = np.linspace(0, 1, N_points)
+    return r, jn(0, zeta_i * r) / jn(0, zeta_i)
+
+
+def prepare_spatial_vdw_weights(r):
+    """
+    Precomputes mode matrices and spatial integration weights once.
+    """
+    # Integration weights w(r) * r
+    w = np.empty_like(r)
+    w[0] = 0.5 * (r[1] - r[0])
+    w[-1] = 0.5 * (r[-1] - r[-2])
+    w[1:-1] = 0.5 * (r[2:] - r[:-2])
+    W_r = w * r
+    
+    W3 = 4 * W_r
+    W4 = 20/3 * W_r
+    
+    return W3, W4
+
+
+
 
 # -----------------------------
 # System
@@ -39,7 +64,11 @@ def system(t : float,
            state : NDArray[np.float64],
            params : dict[str, int | float | NDArray[np.float64]],
            use_3d : bool = True,
-           use_4d : bool = True) -> NDArray[np.float64]:
+           use_4d : bool = True,
+           delta_sweep : bool = False,
+           delta_start : float = None,
+           delta_stop : float = None,
+           sweepspeed : float = None) -> NDArray[np.float64]:
     '''
     Computes the ODE system with conditional quadratic and cubic non-linear mode interactions.
 
@@ -118,13 +147,25 @@ def system(t : float,
         +(params['mu']  / params['sigma'] ) * interaction_3D
         -(params['mu']  / (params['sigma'] **2)) * interaction_4D
     )
+    #print('dissipation:', -params['gamma'] * y)
+    #print('linear spring:', -params['mu'] * x)
+    #print('driving:', +params['mu'] * params['xi'] * z)
+    #print('3D:', (params['mu']  / params['sigma'] ) * interaction_3D)
 
     # --- z equation ---
-    z_dot = (
-        1.0 / params['tau'] 
-    ) * (
-        params['alpha']  / ((params['delta']  + np.sum(x))**2 + 1.0)
-        - z
+    if delta_sweep:
+
+        current_delta = delta_start - sweepspeed * t
+        
+        if current_delta < delta_stop:
+            delta = delta_stop
+        else:
+            delta = current_delta
+    else:
+        delta = params['delta']
+
+    z_dot = (1.0 / params['tau']) * (
+        params['alpha'] / ((delta + np.sum(x))**2 + 1.0) - z
     )
 
     # concatenate into one vector
@@ -132,6 +173,177 @@ def system(t : float,
         x_dot,
         y_dot,
         np.array([z_dot])
+    ])
+
+    return dstate_dt
+
+
+
+def compute_full_optomechanical_energy(sol_y, params, use_3d=True, use_4d=True):
+    """
+    Computes Mechanical, Optical, and Interaction Energies over time.
+    
+    sol_y : shape (2*N + 1, N_points)
+            sol_y[:N]     -> x_i (displacements)
+            sol_y[N:2*N]  -> y_i (velocities)
+            sol_y[2*N]    -> z   (optical mode / cavity field)
+    """
+    N = params['N']
+    x = sol_y[:N, :]
+    y = sol_y[N:2*N, :]
+    z = sol_y[2*N, :]  # Optical mode variable
+    
+    mu = params['mu'][:, None]
+    
+    # 1. Mechanical Energies
+    T = 0.5 * np.sum(y**2, axis=0)                  # Kinetic
+    V_0 = 0.5 * np.sum(mu * (x**2), axis=0)         # Linear Potential
+    
+    # Non-linear mechanical potentials
+    V_3 = (1.0 / 3.0) * np.einsum('ijk,it,jt,kt->t', params['chi_ijk'], x, x, x) if use_3d else 0.0
+    V_4 = (1.0 / 4.0) * np.einsum('ijkl,it,jt,kt,lt->t', params['chi_ijkl'], x, x, x, x) if use_4d else 0.0
+    
+    E_mech = T + V_0 + V_3 + V_4
+    
+    # 2. Optical Energy
+    # Assuming z is the complex field amplitude (or real photon number if z >= 0)
+    photon_number = np.abs(z)**2 if np.iscomplexobj(z) else z**2
+    
+    # In unitless form: E_opt = detuning * photon_number (or bare cavity energy)
+    delta_eff = params.get('delta', 1.0)
+    E_opt = -delta_eff * photon_number
+    
+    # 3. Optomechanical Interaction Energy
+    # g_i is the coupling vector (e.g., params['xi'] or optomechanical coupling g)
+    g_i = params.get('xi', np.ones(N))[:, None]
+    V_int = 0#-np.sum(g_i * x, axis=0) * photon_number
+    
+    # Total Energy
+    E_total = E_mech + E_opt #+ V_int
+    
+    return {
+        'E_total': E_total,
+        'E_mech': E_mech,
+        'E_opt': E_opt,
+        'V_int': V_int,
+        'photons': photon_number}
+
+
+
+def system_non_adiabatic(t : float,
+           state : NDArray[np.float64],
+           params : dict[str, int | float | NDArray[np.float64]],
+           use_3d : bool = True,
+           use_4d : bool = True,
+           delta_sweep : bool = False,
+           delta_start : float = None,
+           delta_stop : float = None,
+           sweepspeed : float = None) -> NDArray[np.float64]:
+    '''
+    Computes the ODE system with conditional quadratic and cubic non-linear mode interactions.
+
+        x_dot_i = y_i
+
+        y_dot_i = -gamma_i y_i
+                  - mu_i x_i
+                  + mu_i z
+                  + [optional] (mu_i / sigma) * sum_{j,k} chi_ijk x_j x_k
+                  - [optional] (mu_i / sigma^2) * sum_{j,k,l} chi_ijkl x_j x_k x_l
+
+        z_dot = (1/tau) * (
+                    alpha / ((delta + sum_i x_i)^2 + 1)
+                    - z
+                )
+
+    Parameters
+    ----------
+    t : float
+        Time (unused, included for solve_ivp compatibility)
+
+    state : ndarray, shape (2N + 1,)
+        State vector:
+            state = [x_1,...,x_N, y_1,...,y_N, z]
+
+    N : int
+        Number of modes
+    gamma : ndarray, shape (N,)
+    mu : ndarray, shape (N,)
+    tau : float
+    alpha : float
+    delta : float
+    sigma : float
+    chi_ijk : ndarray, shape (N,N,N)
+        3D cubic mode interaction tensor
+    chi_ijkl : ndarray, shape (N,N,N,N)
+        4D quartic mode interaction tensor
+    use_3d : bool, default True
+        Flag to include or ignore the cubic potential interaction (3D tensor contraction)
+    use_4d : bool, default True
+        Flag to include or ignore the quartic potential interaction (4D tensor contraction)
+
+    Returns
+    -------
+    dstate_dt : ndarray, shape (2N + 1,)
+    '''
+
+    N = params['N']
+
+    # unpack state
+    x = state[:N]
+    y = state[N:2*N]
+    u = state[2*N]
+    v = state[2*N+1]
+    z = state[2*N+2]
+
+    # --- x equations ---
+    x_dot = y
+
+    # --- nonlinear interaction terms ---
+    if use_4d:
+        use_3d = True
+        interaction_4D = np.einsum('ijkl,j,k,l->i', params['chi_ijkl'][:N, :N, :N, :N], x, x, x)
+    else:
+        interaction_4D = np.zeros(N)
+
+    if use_3d:
+        interaction_3D = np.einsum('ijk,j,k->i', params['chi_ijk'][:N, :N, :N], x, x)
+    else:
+        interaction_3D = np.zeros(N)
+        
+    
+    # --- y equations ---
+    y_dot = (
+        -params['gamma'] * y
+        -params['mu'] * x
+        +params['mu'] * params['xi'] * z
+        +(params['mu']  / params['sigma'] ) * interaction_3D
+        -(params['mu']  / (params['sigma'] **2)) * interaction_4D
+    )
+
+    # --- z equation ---
+    if delta_sweep:
+
+        current_delta = delta_start - sweepspeed * t
+        
+        if current_delta < delta_stop:
+            delta = delta_stop
+        else:
+            delta = current_delta
+    else:
+        delta = params['delta']
+
+    sum_x = np.sum(x)
+    eff_detuning = params['delta'] + sum_x
+    
+    u_dot = (1.0 / params['nu']) * (-u - eff_detuning * v + np.sqrt(params['alpha']))
+    v_dot = (1.0 / params['nu']) * (-v + eff_detuning * u)
+    z_dot = (1.0 / params['tau']) * (u**2 + v**2 - z)
+
+    # concatenate into one vector (2N + 3)
+    dstate_dt = np.concatenate([
+        x_dot,
+        y_dot,
+        np.array([u_dot, v_dot, z_dot])
     ])
 
     return dstate_dt
@@ -243,20 +455,228 @@ def system_numba(t : float,
 
 
 
+@njit(fastmath=True)
+def _system_numba_hidde_core(t : float,
+                       state : NDArray[np.float64],
+                       N : int,
+                       gamma : NDArray[np.float64],
+                       mu : NDArray[np.float64],
+                       tau : float,
+                       alpha : float,
+                       delta : float,
+                       sigma : float,
+                       xi : NDArray[np.float64],
+                       profiles,
+                       W3,
+                       W4,
+                       use_3d : bool = True,
+                       use_4d : bool = True) -> NDArray[np.float64]:
+    '''
+    Core numerical backend compiled to raw machine code.
+    '''
+    # Unpack state
+    x = state[0:N]
+    y = state[N:2*N]
+    z = state[2*N]
+    
+    # Preallocate derivatives
+    derivatives = np.empty(2 * N + 1)
+    dx = derivatives[0:N]
+    dy = derivatives[N:2*N]
+    
+    # 1. dx_i/dt = y_i
+    dx[:] = y
+    
+    # 2. Compute the interaction terms
+    sigma_sq = sigma * sigma
+    
+    X = profiles @ x
+    M = profiles.shape[0]
+    
+    # Vectorized element-wise operations
+    X2_W3 = (X**2) * W3
+    X3_W4 = (X**3) * W4
+
+    # 4. Accelerations dv/dt
+    for i in range(N):
+
+        # 3rd Order Van der Waals Force Projection
+        if use_3d:
+            f3_i = 0.0
+            for m in range(M):
+                f3_i += profiles[m, i] * X2_W3[m]
+
+        # 4th Order Van der Waals Force Projection
+        if use_4d:
+            f4_i = 0.0
+            for m in range(M):
+                f4_i += profiles[m, i] * X3_W4[m]
+
+        dy[i] = -gamma[i]*y[i] - mu[i]*x[i] + mu[i]*xi[i]*z + (mu[i] / sigma) * f3_i - (mu[i] / sigma_sq) * f4_i
+        
+    # 4. dz/dt
+    sum_x = np.sum(x)
+    dz = (1.0 / tau) * ((alpha / ((delta + sum_x)**2 + 1.0)) - z)
+    derivatives[2*N] = dz
+    
+    return derivatives
+
+
+def system_numba_hidde(t : float,
+                 state : NDArray[np.float64],
+                 params : dict[str, int | float | NDArray[np.float64]],
+                 profiles, W3, W4,
+                 use_3d : bool = True,
+                 use_4d : bool = True) -> NDArray[np.float64]:
+    '''
+    User-facing ODE function that accepts the params dictionary 
+    and handles solve_ivp compatibility cleanly.
+    '''
+    N = params['N']
+    if use_4d:
+        use_3d = True
+    if not use_3d:
+        use_4d = False
+    
+    return _system_numba_hidde_core(
+        t=t,
+        state=state,
+        N=N,
+        gamma=params['gamma'],
+        mu=params['mu'],
+        tau=params['tau'],
+        alpha=params['alpha'],
+        delta=params['delta'],
+        sigma=params['sigma'],
+        xi=params['xi'],
+        profiles=profiles,
+        W3=W3,
+        W4=W4,
+        use_3d=use_3d,
+        use_4d=use_4d
+    )
+
+
+
+@njit(fastmath=True)
+def _system_numba_core_fast(
+    t: float,
+    state: NDArray[np.float64],
+    derivatives: NDArray[np.float64],  # Pre-allocated output array passed in!
+    N: int,
+    gamma: NDArray[np.float64],
+    mu: NDArray[np.float64],
+    tau: float,
+    alpha: float,
+    delta: float,
+    sigma: float,
+    chi_ijk: NDArray[np.float64],
+    chi_ijkl: NDArray[np.float64],
+    xi: NDArray[np.float64],
+    use_3d: bool = True,
+    use_4d: bool = True
+) -> None:
+    """
+    Zero-allocation Numba core that computes RHS directly into `derivatives`.
+    """
+    # Unpack state pointers without slicing allocations
+    z = state[2 * N]
+    sigma_inv = 1.0 / sigma
+    sigma_sq_inv = sigma_inv * sigma_inv
+
+    # 1. dx_i/dt = y_i
+    for i in range(N):
+        derivatives[i] = state[N + i]
+
+    # Compute sum_x inline for z equation
+    sum_x = 0.0
+    for i in range(N):
+        sum_x += state[i]
+
+    # 2 & 3. Compute dy_i/dt directly without intermediate tensor_term array
+    for i in range(N):
+        s_3d = 0.0
+        if use_3d:
+            for j in range(N):
+                xj = state[j]
+                s_3d += chi_ijk[i, j, j] * xj * xj
+                for k in range(j + 1, N):
+                    s_3d += 2.0 * chi_ijk[i, j, k] * xj * state[k]
+
+        s_4d = 0.0
+        if use_4d:
+            for j in range(N):
+                xj = state[j]
+                xj_sq = xj * xj
+                s_4d += chi_ijkl[i, j, j, j] * xj_sq * xj
+                
+                for k in range(j + 1, N):
+                    xk = state[k]
+                    s_4d += 3.0 * chi_ijkl[i, j, j, k] * xj_sq * xk
+                    s_4d += 3.0 * chi_ijkl[i, j, k, k] * xj * xk * xk
+                    
+                    for l in range(k + 1, N):
+                        s_4d += 6.0 * chi_ijkl[i, j, k, l] * xj * xk * state[l]
+
+        # Combine nonlinear terms directly into dy[i]
+        mu_i = mu[i]
+        tensor_term_i = (mu_i * sigma_inv) * s_3d - (mu_i * sigma_sq_inv) * s_4d
+        
+        # dy_i/dt
+        derivatives[N + i] = -gamma[i] * state[N + i] - mu_i * state[i] + mu_i * xi[i] * z + tensor_term_i
+
+    # 4. dz/dt
+    denom = delta + sum_x
+    derivatives[2 * N] = (1.0 / tau) * ((alpha / (denom * denom + 1.0)) - z)
+
+
+
+def system_numba_fast(t : float,
+                 state : NDArray[np.float64],
+                 params : dict[str, int | float | NDArray[np.float64]],
+                 use_3d : bool = True,
+                 use_4d : bool = True) -> NDArray[np.float64]:
+    '''
+    User-facing ODE function that accepts the params dictionary 
+    and handles solve_ivp compatibility cleanly.
+    '''
+    N = params['N']
+    if use_4d:
+        use_3d = True
+    if not use_3d:
+        use_4d = False
+    
+    return _system_numba_core_fast(
+        t=t,
+        state=state,
+        N=N,
+        gamma=params['gamma'],
+        mu=params['mu'],
+        tau=params['tau'],
+        alpha=params['alpha'],
+        delta=params['delta'],
+        sigma=params['sigma'],
+        chi_ijk=params['chi_ijk'][:N, :N, :N],
+        chi_ijkl=params['chi_ijkl'][:N, :N, :N, :N],
+        xi=params['xi'],
+        use_3d=use_3d,
+        use_4d=use_4d
+    )
+
+
 # -----------------------------
 # Fixed points
 # -----------------------------
 
-def fixed_points_num(params : dict[str, int | float | NDArray[np.float64]],
+def fixed_points_num(system_func, 
+                     args,
                      num_tries : int = 30,
-                     tolerance : float = 1e-10,
-                     use_3d : bool = True,
-                     use_4d : bool = True,
-                     numba : bool = True) -> list[float]:
+                     tolerance : float = 1e-10) -> list[float]:
     '''
     Finds fixed points numerically and filters them based on physical bounds:
     0 < x_i < sigma  and  0 < z < sigma (with y_i = 0).
     '''
+    params = args[0]
     N = params['N']
     
     def steady_state_objective(vars_xz):
@@ -264,12 +684,7 @@ def fixed_points_num(params : dict[str, int | float | NDArray[np.float64]],
         z_val = vars_xz[-1]
         U = np.concatenate([x_val, np.zeros(N), [z_val]])
 
-        if numba:
-            system_func = system_numba
-        elif not numba:
-            system_func = system
-
-        derivs = system_func(0, U, params, use_3d=use_3d, use_4d=use_4d)
+        derivs = system_func(0, U, *args)
         return np.concatenate([derivs[N:2*N], [derivs[-1]]])
 
     valid_solutions = []
@@ -357,7 +772,7 @@ def dL(x : float | NDArray[np.float64],
     N = params['N']
     x = x[:N]
     q = np.sum(x) + params['delta']
-    return (-2*params['alpha']/params['tau']) * q / ( q**2 + 1 )**2
+    return (-2*params['alpha']) * q / ( q**2 + 1 )**2
 
 
 def Jacobian(t : float,
@@ -780,7 +1195,7 @@ def _filter_arrays(arr_list : list[NDArray[np.float64]]) -> list[NDArray[np.floa
 
 def _print_dict(dic):
     for key, val in dic.items():
-        print(f"{key:<10} : {val}")
+        print(f"{key:<15} : {val}")
 
 
 def to_SI(params,
@@ -804,18 +1219,18 @@ def to_SI(params,
     omega = 2*np.pi*f
 
     params_SI = {}
-
+    if 'N' in params: params_SI['N'] = params['N']
     params_SI['d'] =  params['sigma'] * kappa_rad_HWHM / G_rad
     c3 = np.sqrt(3*rho_s*a_vdw / (rho * params_SI['d']**3))
     Omega1 = jn_zeros(1, 1)[0] * c3 / R
     m0 = np.pi*R**4*rho**2 / (jn_zeros(1, 1)[0]**2 * params_SI['d'] * rho_s)
 
-    params_SI['tau'] = params['tau'] / Omega1 # s
-    params_SI['freqs'] = np.sqrt(params['mu'])/(2*np.pi) * Omega1 # Hz
-    params_SI['masses'] = m0 / params['mu'] # kg
-    params_SI['Gammas'] = params['gamma']/(2*np.pi) * Omega1 # Hz
-    params_SI['detuning'] = kappa*params['delta']/2 # Hz
-    params_SI['power'] = params['alpha'] / (2*beta * kappa_ex_rad_HWHM * G_rad**2 * params_SI['d']**4 / (3*np.pi*a_vdw*rho*omega*kappa_rad_HWHM**3*R**2)) # W
+    if 'tau' in params: params_SI['tau'] = params['tau'] / Omega1 # s
+    if 'mu' in params: params_SI['freqs'] = np.sqrt(params['mu'])/(2*np.pi) * Omega1 # Hz
+    if 'mu' in params: params_SI['masses'] = m0 / params['mu'] # kg
+    if 'gamma' in params: params_SI['Gammas'] = params['gamma']/(2*np.pi) * Omega1 # Hz
+    if 'delta' in params: params_SI['detuning'] = kappa*params['delta']/2 # Hz
+    if 'alpha' in params: params_SI['power'] = params['alpha'] / (2*beta * kappa_ex_rad_HWHM * G_rad**2 * params_SI['d']**4 / (3*np.pi*a_vdw*rho*omega*kappa_rad_HWHM**3*R**2)) # W
 
     if verbose:
         _print_dict(params_SI)
@@ -844,15 +1259,19 @@ def to_unitless(params_SI,
     omega = 2*np.pi*f
 
     params = {}
-
+    params['N'] = params_SI['N']
+    params['mu'] = mu_spectrum(params_SI['N'])
     params['sigma'] = params_SI['d'] * G_rad / kappa_rad_HWHM
     c3 = np.sqrt(3*rho_s*a_vdw / (rho * params_SI['d']**3))
     Omega1 = jn_zeros(1, 1)[0] * c3 / R
+    params['Omega1'] = Omega1
 
-    params['tau'] = params_SI['tau'] * Omega1
-    params['gamma'] = params_SI['Gammas']*(2*np.pi) / Omega1
-    params['delta'] = 2/kappa*params_SI['detuning']
-    params['alpha'] = params_SI['power'] * (2*beta * kappa_ex_rad_HWHM * G_rad**2 * params_SI['d']**4 / (3*np.pi*a_vdw*rho*omega*kappa_rad_HWHM**3*R**2))
+    if 'tau' in params_SI: params['tau'] = params_SI['tau'] * Omega1
+    if 'Gammas' in params_SI: params['gamma'] = params_SI['Gammas']*(2*np.pi) / Omega1
+    if 'detuning' in params_SI: params['delta'] = 2/kappa*params_SI['detuning']
+    if 'power' in params_SI: params['alpha'] = params_SI['power'] * (2*beta * kappa_ex_rad_HWHM * G_rad**2 * params_SI['d']**4 / (3*np.pi*a_vdw*rho*omega*kappa_rad_HWHM**3*R**2))
+
+    params['nu'] = Omega1/kappa_rad_HWHM
 
     if verbose:
         _print_dict(params)
