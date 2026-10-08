@@ -230,7 +230,7 @@ y = sol.y[N:2*N, :]
 film_height = np.sum(x, axis=0)
 dt = t_eval[1] - t_eval[0]
 
-distance_to_fixed_point = np.mean(sol.y - main_fixed_point.reshape(-1, 1), axis=0)
+distance_to_fixed_point = np.sqrt(np.mean((sol.y - saddle_remnant.reshape(-1, 1))**2, axis=0))
 
 
 Omegas = np.sqrt(config_final['mu'])
@@ -284,56 +284,44 @@ t_eval_padded = np.pad(t_eval.astype(object), (0, 1), constant_values=None)
 ranges = list(zip(t_eval_padded[starts], t_eval_padded[stops]))
 
 
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 12), sharex=True)
+fig, axs = plt.subplots(6, 1, figsize=(12, 12), sharex=True)
 
 # --- Left Panel: Time Series & Peaks ---
-ax1.plot(t_eval, film_height, c="k", zorder=100, label="Film height", alpha=1)
-#ax1.plot(t_eval, offset, c="r", zorder=101, label="offset", alpha=.7)
-analytic_signal = hilbert(x, axis=-1)
+axs[0].plot(t_eval, film_height, c="k", zorder=100, label="Film height", alpha=1)
+ax0_right = axs[0].twinx()
+for i in range(N):
+    ax0_right.plot(t_eval, sol.y[i, :], c="k", zorder=100, alpha=0.3)
+axs[0].set_ylabel('Film Displacement')
 
-    # 2. Extract instantaneous unwrapped phase for each oscillator
-instant_phase = np.angle(analytic_signal)
-instant_amp = np.abs(analytic_signal)
+axs[1].plot(t_eval, speed)
+axs[1].set_ylabel('Speed (local vector field strength)')
 
-#for i in range(N):
-    #ax1.plot(t_eval, instant_amp[i,:], alpha=0.5)
+axs[2].plot(t_eval, sol.y[-1,:])
+axs[2].set_ylabel('Optical Field')
 
+axs[3].plot(t_eval, distance_to_fixed_point, c='orange', zorder=100)
 
-
-ax_right = ax1.twinx()
-
-ax1.set_xlabel("Time")
-ax1.set_ylabel("Displacement / Phase")
-ax1.set_title("System Dynamics & Detected Peaks")
-#ax_right.plot(t_eval, speed, c='orange', zorder=100)
-ax1.legend()
-
-ax_right.set_ylabel("Phase Space Speed")
-
-# --- Right Panel: Histogram of Peak Intervals ---
-#ax2.hist(diffs, bins=60, color="skyblue", edgecolor="black")
-ax2.plot(t_eval, R_ML, c="g", zorder=101, alpha=.5)
-#ax2.plot(t_eval, R_ML2, c="r", zorder=101, alpha=.5)
-ax2.plot(t_eval, R_ML_running_avg, c="g", zorder=101)
-print(ranges)
+axs[4].plot(t_eval, R_ML, c="g", zorder=101, alpha=.5)
+axs[4].plot(t_eval, R_ML_running_avg, c="g", zorder=101)
 for range in ranges:
-    ax2.vlines(range[0], 0, 1)
-    ax2.vlines(range[1], 0, 1)
+    axs[4].vlines(range[0], 0, 1)
+    axs[4].vlines(range[1], 0, 1)
+axs[4].set_xlabel("Time")
 
-#R_ML = get_mode_locking_order_parameter(x)
-#R_ML_running_avg = uniform_filter1d(R_ML, size=window_size)
-#ax2.plot(t_eval, R_ML, c="b", zorder=101,alpha=.5)
-#ax2.plot(t_eval, R_ML_running_avg, c="b", zorder=101,)
+fft_freqs = np.fft.rfftfreq(N_points, d=dt)
+fft_vals = (2.0 / N_points) * np.abs(np.fft.rfft(film_height-np.mean(film_height)))
 
-ax2.set_xlabel("Time Interval (diffs)")
-ax2.set_ylabel("Frequency")
-ax2.set_title("Histogram of Peak Intervals (5 < diff < 10)")
-ax2.set_xlim(1000, 1200)
+spectrum = np.sqrt(config_final['mu'])/2/np.pi
+f_max = spectrum[-1]+np.mean(np.diff(spectrum))
+
+axs[5].vlines(spectrum, np.min(fft_vals), np.max(fft_vals), color='k', linestyle='--', alpha=.7, label='unperturbed spectrum')
+axs[5].plot(fft_freqs, fft_vals)
+
 plt.tight_layout()
 plt.show()
 
 
-spectrum = True
+spectrum = False
 
 if spectrum:
     analytic_signal = hilbert(x, axis=-1)
