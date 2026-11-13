@@ -14,6 +14,8 @@ def analyze_intermittency_sweep(filepath="bruteforce_sweep_results4_N=15.npz", T
         sigmas = data['sigmas_axis']
         alphas = data['alphas_axis']
         deltas = data['deltas_axis']
+
+        print(np.min(alphas), np.max(alphas), len(alphas), np.min(deltas), np.max(deltas), len(deltas))
         classifications = data['classifications']
         ranges_list = data['ranges_list']
         thresholds = data['thresholds'] if 'thresholds' in data else np.array([0.80, 0.85, 0.90, 0.95])

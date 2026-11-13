@@ -144,8 +144,7 @@ def _parallel_worker(task_args):
             
             x_total = np.sum(sol.y[:N_local, :], axis=0)
             x_ac = x_total - np.mean(x_total)
-            plt.plot(t_eval, x_total)
-            plt.show()
+
 
             if np.max(x_ac) < 1e-3:
                 classification = 'BELOW THRESHOLD'
@@ -177,9 +176,7 @@ def _parallel_worker(task_args):
                         )
 
                         distance = np.linalg.norm(sol_2.y - sol.y[:, -N_points_lyap:], axis=0)
-                        plt.plot(t_lyap, distance)
-                        plt.yscale('log')
-                        plt.show()
+
                     
                         if len(np.where(distance >= 1)[0]) == 0:
                             if len(peaks) == 0:
@@ -378,8 +375,8 @@ if __name__ == '__main__':
     
     default_x0 = np.zeros(2 * N + 1)
     T_sim = 1000
-    T_eval = 1000
-    T_lyap = 500
+    T_eval = 8000
+    T_lyap = 1000
 
     time_resolution = int(10 * np.sqrt(mu_spectrum(N)[-1])/(2*np.pi))
     N_points_eval = T_eval * time_resolution
@@ -394,18 +391,19 @@ if __name__ == '__main__':
     _ = system_numba_hidde(0.0, default_x0, base_config, profiles, W3, W4)
     print('Pre-compilation finished successfully.\n')
 
+
     # Sweep parameters
-    deltas = np.linspace(-4, -4, 10)[::-1] 
-    alphas = np.linspace(0, 1, 10)
-    ds = np.linspace(9.385, 18.31, 13)
-    sigmas = [30, 50, 70]
+    deltas = np.linspace(-4, -1.7320508075688772, 300)
+    alphas = np.linspace(0.10264004785593346, 0.7252946497828733, 800)
+    #ds = np.linspace(9.385, 18.31, 13)
+    sigmas = [63.9651, 66.5634, 69.1617]
     log_filename = "realtime_execution_times_sigmasweep.csv"
 
     sweeper = LayeredParallelSmartSweeper(
         base_config_SI, T_sim, default_x0, T_eval, T_lyap, use_3d, use_4d,
         N_points_eval=N_points_eval, N_points_lyap=N_points_lyap,
         profiles=profiles, W3=W3, W4=W4,
-        num_cores=1, log_filename=log_filename
+        num_cores=8, log_filename=log_filename
     )
     
     print(f'Running sweep with Gamma = {base_config_SI["Gammas"][0]:.4f}, tau = {base_config_SI["tau"]:.4f}')

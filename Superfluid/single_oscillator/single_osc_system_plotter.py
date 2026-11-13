@@ -19,6 +19,7 @@ alpha_min, alpha_max = 0, 5
 # -----------------------------
 alpha0, delta0, zeta0, tau0 = 1.0, -2.0, 0.05, 1.0
 x0, v0, z0 = 0.5, 0.0, 0.0
+T_eq = 400
 T0 = 20
 
 colors = ['r', 'b', 'g']
@@ -140,7 +141,7 @@ def update(val):
     print(eigvals)
     print(eigvecs)
     roots = x_star(alpha, delta)
-
+    '''
     if not hasattr(update, "eig_quivers"):
         update.eig_quivers = []
     else:
@@ -190,7 +191,7 @@ def update(val):
                 )
                 update.eig_quivers.append(s)
 
-
+    '''
 
     for i in range(3):
         if i < len(eigvals):
@@ -202,14 +203,14 @@ def update(val):
             scatters[i].set_label("")
     ax2.legend()
 
-    t_eval = np.linspace(0, T, 1000)
+    t_eval = np.linspace(T_eq, T_eq+T, 1000)
     sol = solve_ivp(lambda t,y: system(t,y,alpha,delta,zeta,tau),
-                    (0,T), [x_init,v_init,z_init], t_eval=t_eval)
+                    (0,T_eq+T), [x_init,v_init,z_init], t_eval=t_eval)
 
     # trajectory
     traj_line.set_data(sol.y[0], sol.y[1])
     traj_line.set_3d_properties(sol.y[2])
-    init_point._offsets3d = ([x_init],[v_init],[z_init])
+    init_point._offsets3d = ([sol.y[0][0]],[sol.y[1][0]],[sol.y[2][0]])
 
     # FIXED POINTS (added back correctly)
     for i, scat in enumerate(fp_scatter):
@@ -228,11 +229,11 @@ def update(val):
     ax3.set_zlim(mins[2]-m[2], maxs[2]+m[2])
 
     # time series
-    line_x.set_data(t_eval, sol.y[0])
+    line_x.set_data(t_eval, sol.y[0]+delta)
     line_v.set_data(t_eval, sol.y[1])
     line_z.set_data(t_eval, sol.y[2])
 
-    ax4.set_xlim(0, T)
+    ax4.set_xlim(T_eq, T_eq+T)
     ax4.set_ylim(sol.y.min(), sol.y.max())
 
     fig.canvas.draw_idle()

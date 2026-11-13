@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Modeling Xenon Delivery by Saturated-Liquid Replacement</title>
+<style>
+  @page { size: letter; margin: 0.75in; }
+  body { max-width: 7.1in; margin: 0 auto; color: #17212b;
+         font: 10.5pt/1.48 "Segoe UI", Arial, sans-serif; }
+  h1 { font-size: 23pt; line-height: 1.15; color: #123954; margin: 0 0 8pt; }
+  h2 { font-size: 15pt; color: #123954; border-bottom: 1px solid #bdd0dc;
+       padding-bottom: 3pt; margin-top: 20pt; }
+  h3 { font-size: 11.5pt; color: #245c78; margin: 15pt 0 4pt; }
+  p { margin: 6pt 0; }
+  .subtitle { color: #4a6575; font-size: 12pt; }
+  .date { color: #637783; }
+  .abstract { background: #f0f5f8; padding: 10pt 12pt; border-left: 3px solid #4382a0; }
+  .eq { text-align: center; margin: 11pt 0; font-size: 12pt; break-inside: avoid; }
+  .note { color: #425765; font-size: 9.5pt; }
+  li { margin: 3pt 0; }
+  table { border-collapse: collapse; width: 100%; margin: 8pt 0; }
+  th, td { padding: 4pt 7pt; border-bottom: 1px solid #cbd6dc; text-align: left; }
+  th { background: #eef3f6; }
+  a { color: #185f87; text-decoration: none; }
+  .ref { padding-left: 22pt; text-indent: -22pt; margin: 7pt 0; font-size: 9pt; }
+  .newpage { break-before: page; }
+  math { font-family: "Cambria Math", "STIX Two Math", serif; }
+</style>
+</head>
+<body>
+<h1>Modeling Xenon Delivery by Saturated-Liquid Replacement</h1>
+<div class="subtitle">A mass-transfer framework for comparison with a sealed headspace</div>
+<div class="date">4 November 2026</div>
+
+<div class="abstract"><b>Abstract.</b> This note formulates a xenon-delivery experiment in which liquid is equilibrated with xenon in an external saturator and then flows into a vessel containing an organoid. The vessel liquid is progressively replaced rather than pressurized by a sealed headspace. Two vessel descriptions are given: a well-mixed control volume and a spatial advection–dispersion model. Both can be coupled to radial xenon diffusion in a spherical organoid. Assumptions, boundary conditions, equilibrium predictions, and measurements needed for comparison are stated explicitly.</div>
+
+<h2>1. Physical picture and modeling distinction</h2>
+<p>The incoming and resident liquids are generally the <em>same solvent</em>; they are not two immiscible fluids with a sharp material interface. The quantity transported through the vessel is dissolved xenon. Bulk liquid motion carries xenon by advection, while molecular diffusion and flow-induced mixing smooth concentration gradients. A sharp replacement front may be a useful approximation at high Péclet number, but is not required.</p>
+<p>The external saturator supplies a prescribed xenon concentration. Liquid replacement changes the vessel concentration, and xenon then diffuses into the organoid. Unlike a sealed-headspace experiment, the incoming liquid is an ongoing source: the vessel's final concentration is not found by conserving the initial sealed-vessel inventory.</p>
+
+<h2>2. Xenon concentration in the incoming liquid</h2>
+<p>Let <i>P</i><sub>s</sub>(<i>t</i>) be the xenon partial pressure in the saturator, <i>T</i> the absolute temperature, and <i>R</i><sub>g</sub> the gas constant. At gas–liquid equilibrium, Henry's law in concentration-over-pressure convention gives</p>
+<div class="eq"><math display="block"><msub><mi>C</mi><mtext>in</mtext></msub><mo>(</mo><mi>t</mi><mo>)</mo><mo>=</mo><msub><mi>H</mi><mi>cp</mi></msub><mo>(</mo><mi>T</mi><mo>)</mo><msub><mi>P</mi><mi>s</mi></msub><mo>(</mo><mi>t</mi><mo>)</mo><mo>.</mo></math></div>
+<p>In the project's partition notation this may be written <math><msub><mi>C</mi><mtext>in</mtext></msub><mo>=</mo><msub><mi>λ</mi><mi>l</mi></msub><msub><mi>P</mi><mi>s</mi></msub><mo>/</mo><mo>(</mo><msub><mi>R</mi><mi>g</mi></msub><mi>T</mi><mo>)</mo></math>, provided <i>λ</i><sub>l</sub> is defined consistently. Henry-constant conventions differ, so units and definition must accompany any numerical value <a href="#ref-iupac">[1]</a>, <a href="#ref-sander">[2]</a>.</p>
+<p>If saturation is incomplete, Henry's law is an equilibrium target rather than the actual outlet concentration. A lumped, well-mixed saturator can be approximated as</p>
+<div class="eq"><math display="block"><mfrac><mrow><mi>d</mi><msub><mi>C</mi><mi>s</mi></msub></mrow><mrow><mi>d</mi><mi>t</mi></mrow></mfrac><mo>=</mo><msub><mi>k</mi><mi>L</mi></msub><mi>a</mi><mo>(</mo><msub><mi>H</mi><mi>cp</mi></msub><msub><mi>P</mi><mi>s</mi></msub><mo>−</mo><msub><mi>C</mi><mi>s</mi></msub><mo>)</mo><mo>,</mo><mspace width="1em"/><msub><mi>C</mi><mtext>in</mtext></msub><mo>=</mo><msub><mi>C</mi><mi>s</mi></msub><mo>.</mo></math></div>
+<p>Here <i>C</i><sub>s</sub> is liquid concentration in the saturator and <i>k</i><sub>L</sub><i>a</i> is a volumetric gas–liquid transfer coefficient. This is a reduced model, not a universal saturator equation; an actual contactor may need a plug-flow or staged gas–liquid model.</p>
+
+<h2>3. Vessel option A: well-mixed liquid</h2>
+<p>If mixing is fast compared with replacement and uptake, represent the vessel by one concentration <i>C</i><sub>v</sub>(<i>t</i>). For constant liquid volume <i>V</i><sub>l</sub>, equal inflow/outflow <i>Q</i>, and one spherical organoid of radius <i>R</i>, the xenon balance is</p>
+<div class="eq"><math display="block"><msub><mi>V</mi><mi>l</mi></msub><mfrac><mrow><mi>d</mi><msub><mi>C</mi><mi>v</mi></msub></mrow><mrow><mi>d</mi><mi>t</mi></mrow></mfrac><mo>=</mo><mi>Q</mi><mo>(</mo><msub><mi>C</mi><mtext>in</mtext></msub><mo>−</mo><msub><mi>C</mi><mi>v</mi></msub><mo>)</mo><mo>−</mo><msub><mi>A</mi><mi>o</mi></msub><mi>J</mi><mo>(</mo><mi>t</mi><mo>)</mo><mo>,</mo><mspace width="1em"/><msub><mi>A</mi><mi>o</mi></msub><mo>=</mo><mn>4</mn><mi>π</mi><msup><mi>R</mi><mn>2</mn></msup><mo>.</mo></math></div>
+<p>The flow term is xenon delivered minus xenon removed by outflow. <i>J</i>&gt;0 is uptake from liquid into tissue, in mol m<sup>−2</sup> s<sup>−1</sup>. Without uptake and with constant inlet concentration,</p>
+<div class="eq"><math display="block"><msub><mi>C</mi><mi>v</mi></msub><mo>(</mo><mi>t</mi><mo>)</mo><mo>=</mo><msub><mi>C</mi><mtext>in</mtext></msub><mo>+</mo><mo>[</mo><msub><mi>C</mi><mi>v</mi></msub><mo>(</mo><mn>0</mn><mo>)</mo><mo>−</mo><msub><mi>C</mi><mtext>in</mtext></msub><mo>]</mo><msup><mi>e</mi><mrow><mo>−</mo><mi>t</mi><mo>/</mo><msub><mi>τ</mi><mtext>flow</mtext></msub></mrow></msup><mo>,</mo><mspace width="1em"/><msub><mi>τ</mi><mtext>flow</mtext></msub><mo>=</mo><msub><mi>V</mi><mi>l</mi></msub><mo>/</mo><mi>Q</mi><mo>.</mo></math></div>
+<p><i>V</i><sub>l</sub>/<i>Q</i> is the ideal well-mixed replacement time; tissue uptake can delay vessel concentration from approaching the inlet value.</p>
+
+<h3>Tissue diffusion and liquid–tissue coupling</h3>
+<p>For a homogeneous spherical organoid with effective xenon diffusivity <i>D</i><sub>t</sub>, tissue concentration <i>C</i><sub>t</sub>(<i>r,t</i>) follows</p>
+<div class="eq"><math display="block"><mfrac><mrow><mo>∂</mo><msub><mi>C</mi><mi>t</mi></msub></mrow><mrow><mo>∂</mo><mi>t</mi></mrow></mfrac><mo>=</mo><mfrac><msub><mi>D</mi><mi>t</mi></msub><msup><mi>r</mi><mn>2</mn></msup></mfrac><mfrac><mo>∂</mo><mrow><mo>∂</mo><mi>r</mi></mrow></mfrac><mo>(</mo><msup><mi>r</mi><mn>2</mn></msup><mfrac><mrow><mo>∂</mo><msub><mi>C</mi><mi>t</mi></msub></mrow><mrow><mo>∂</mo><mi>r</mi></mrow></mfrac><mo>)</mo><mo>,</mo><mspace width="1em"/><mn>0</mn><mo>&lt;</mo><mi>r</mi><mo>&lt;</mo><mi>R</mi><mo>.</mo></math></div>
+<p>Center symmetry imposes <math><msub><mi>∂</mi><mi>r</mi></msub><msub><mi>C</mi><mi>t</mi></msub><mo>|</mo><msub><mi>r</mi><mo>=</mo><mn>0</mn></msub><mo>=</mo><mn>0</mn></math>. With negligible liquid-film resistance, instantaneous surface partition gives</p>
+<div class="eq"><math display="block"><msub><mi>C</mi><mi>t</mi></msub><mo>(</mo><mi>R</mi><mo>,</mo><mi>t</mi><mo>)</mo><mo>=</mo><msub><mi>λ</mi><mrow><mi>t</mi><mo>/</mo><mi>l</mi></mrow></msub><msub><mi>C</mi><mi>v</mi></msub><mo>(</mo><mi>t</mi><mo>)</mo><mo>,</mo><mspace width="1em"/><mi>J</mi><mo>(</mo><mi>t</mi><mo>)</mo><mo>=</mo><msub><mi>D</mi><mi>t</mi></msub><msub><mi>∂</mi><mi>r</mi></msub><msub><mi>C</mi><mi>t</mi></msub><mo>|</mo><msub><mi>r</mi><mo>=</mo><mi>R</mi></msub><mo>.</mo></math></div>
+<p>This sign convention makes uptake positive when concentration is higher at the tissue surface than at its center. For finite liquid-film resistance, introduce surface concentration <i>C</i><sub>l,s</sub> and use</p>
+<div class="eq"><math display="block"><mi>J</mi><mo>=</mo><msub><mi>k</mi><mi>l</mi></msub><mo>(</mo><msub><mi>C</mi><mi>v</mi></msub><mo>−</mo><msub><mi>C</mi><mrow><mi>l</mi><mo>,</mo><mi>s</mi></mrow></msub><mo>)</mo><mo>=</mo><msub><mi>D</mi><mi>t</mi></msub><msub><mi>∂</mi><mi>r</mi></msub><msub><mi>C</mi><mi>t</mi></msub><mo>|</mo><msub><mi>r</mi><mo>=</mo><mi>R</mi></msub><mo>,</mo><mspace width="1em"/><msub><mi>C</mi><mi>t</mi></msub><mo>(</mo><mi>R</mi><mo>,</mo><mi>t</mi><mo>)</mo><mo>=</mo><msub><mi>λ</mi><mrow><mi>t</mi><mo>/</mo><mi>l</mi></mrow></msub><msub><mi>C</mi><mrow><mi>l</mi><mo>,</mo><mi>s</mi></mrow></msub><mo>.</mo></math></div>
+<p><i>k</i><sub>l</sub> is the liquid-side mass-transfer coefficient. Further membrane or interfacial resistance can be added in series if needed.</p>
+
+<h2 class="newpage">4. Vessel option B: spatial advection–dispersion</h2>
+<p>When gradients along the vessel matter, a one-dimensional cross-section-averaged model is</p>
+<div class="eq"><math display="block"><mfrac><mrow><mo>∂</mo><msub><mi>C</mi><mi>l</mi></msub></mrow><mrow><mo>∂</mo><mi>t</mi></mrow></mfrac><mo>+</mo><mi>u</mi><mfrac><mrow><mo>∂</mo><msub><mi>C</mi><mi>l</mi></msub></mrow><mrow><mo>∂</mo><mi>z</mi></mrow></mfrac><mo>=</mo><msub><mi>D</mi><mtext>ax</mtext></msub><mfrac><msup><mo>∂</mo><mn>2</mn></msup><msup><mo>∂</mo><msup><mi>z</mi><mn>2</mn></msup></msup></mfrac><msub><mi>C</mi><mi>l</mi></msub><mo>.</mo></math></div>
+<p><i>u</i> is mean velocity and <i>D</i><sub>ax</sub> is effective axial dispersion, including molecular diffusion and unresolved spreading due to the velocity profile and mixing. Taylor's tube-flow analysis explains shear-enhanced effective spreading <a href="#ref-taylor">[3]</a>. Danckwerts inlet and outlet conditions are</p>
+<div class="eq"><math display="block"><mi>u</mi><msub><mi>C</mi><mi>l</mi></msub><mo>(</mo><mn>0</mn><mo>,</mo><mi>t</mi><mo>)</mo><mo>−</mo><msub><mi>D</mi><mtext>ax</mtext></msub><msub><mi>∂</mi><mi>z</mi></msub><msub><mi>C</mi><mi>l</mi></msub><mo>|</mo><msub><mi>z</mi><mo>=</mo><mn>0</mn></msub><mo>=</mo><mi>u</mi><msub><mi>C</mi><mtext>in</mtext></msub><mo>(</mo><mi>t</mi><mo>)</mo><mo>,</mo><mspace width="1em"/><msub><mi>∂</mi><mi>z</mi></msub><msub><mi>C</mi><mi>l</mi></msub><mo>|</mo><msub><mi>z</mi><mo>=</mo><msub><mi>L</mi><mi>v</mi></msub></msub><mo>=</mo><mn>0</mn><mo>.</mo></math></div>
+<p>An initial profile <i>C</i><sub>l</sub>(<i>z</i>,0) is also required. This model describes liquid xenon transport, not uptake by one isolated organoid. For one organoid, resolve its surrounding liquid and couple surface flux to the tissue equation. For a distributed population of organoids, a homogenized sink is possible:</p>
+<div class="eq"><math display="block"><mfrac><mrow><mo>∂</mo><msub><mi>C</mi><mi>l</mi></msub></mrow><mrow><mo>∂</mo><mi>t</mi></mrow></mfrac><mo>+</mo><mi>u</mi><mfrac><mrow><mo>∂</mo><msub><mi>C</mi><mi>l</mi></msub></mrow><mrow><mo>∂</mo><mi>z</mi></mrow></mfrac><mo>=</mo><msub><mi>D</mi><mtext>ax</mtext></msub><mfrac><msup><mo>∂</mo><mn>2</mn></msup><msup><mo>∂</mo><msup><mi>z</mi><mn>2</mn></msup></msup></mfrac><msub><mi>C</mi><mi>l</mi></msub><mo>−</mo><msub><mi>a</mi><mi>s</mi></msub><mi>J</mi><mo>.</mo></math></div>
+<p><i>a</i><sub>s</sub> is organoid area per liquid volume. Do not spread one organoid's uptake uniformly along the vessel unless that is an intentional volume-averaged approximation.</p>
+
+<h2>5. Equilibrium and step changes</h2>
+<p>For a constant, fully equilibrated inlet maintained indefinitely, with no reaction or degradation, the final state is spatially uniform:</p>
+<div class="eq"><math display="block"><msub><mi>C</mi><mi>v</mi></msub><mo>→</mo><msub><mi>C</mi><mtext>in</mtext></msub><mo>,</mo><mspace width="1em"/><msub><mi>C</mi><mi>t</mi></msub><mo>(</mo><mi>r</mi><mo>)</mo><mo>→</mo><msub><mi>λ</mi><mrow><mi>t</mi><mo>/</mo><mi>l</mi></mrow></msub><msub><mi>C</mi><mtext>in</mtext></msub><mo>.</mo></math></div>
+<p>This sustained-feed steady state differs from sealed-headspace equilibrium, where finite xenon inventory redistributes among gas, liquid, and tissue. For equal increments <math><mi>Δ</mi><msub><mi>P</mi><mi>s</mi></msub></math>, the ideal inlet level after <i>k</i> steps is</p>
+<div class="eq"><math display="block"><msub><mi>C</mi><mrow><mtext>in</mtext><mo>,</mo><mi>k</mi></mrow></msub><mo>=</mo><msub><mi>H</mi><mi>cp</mi></msub><mi>k</mi><mi>Δ</mi><msub><mi>P</mi><mi>s</mi></msub><mo>.</mo></math></div>
+<p>During finite intervals, liquid and tissue concentrations lag the equilibrium reference levels. Saturator dynamics or tubing dead volume can also delay pressure steps before they reach the vessel.</p>
+
+<h2>6. Dimensionless scales and comparison</h2>
+<div class="eq"><math display="block"><msub><mi>τ</mi><mtext>flow</mtext></msub><mo>=</mo><msub><mi>V</mi><mi>l</mi></msub><mo>/</mo><mi>Q</mi><mo>,</mo><mspace width="1em"/><msub><mi>τ</mi><mtext>tissue</mtext></msub><mo>=</mo><msup><mi>R</mi><mn>2</mn></msup><mo>/</mo><msub><mi>D</mi><mi>t</mi></msub><mo>,</mo><mspace width="1em"/><mi>Pe</mi><mo>=</mo><mi>u</mi><msub><mi>L</mi><mi>v</mi></msub><mo>/</mo><msub><mi>D</mi><mtext>ax</mtext></msub><mo>,</mo><mspace width="1em"/><msub><mi>Fo</mi><mi>t</mi></msub><mo>=</mo><msub><mi>D</mi><mi>t</mi></msub><mi>t</mi><mo>/</mo><msup><mi>R</mi><mn>2</mn></msup><mo>.</mo></math></div>
+<p>Flow time estimates replacement in a mixed-volume approximation; tissue diffusion time estimates internal equilibration. The Péclet number compares axial advection with effective axial dispersion. Compare sealed and flow-through systems using the same organoid parameters, temperature, initial tissue state, and final inlet xenon level. Compare vessel/interface concentration histories and tissue-average or center-to-surface histories, not nominal pressures alone.</p>
+
+<h2>7. Recommended first implementation and measurements</h2>
+<p>Start with the well-mixed balance plus spherical tissue diffusion when vessel mixing is fast. Use the advection–dispersion equation when replacement fronts or axial gradients matter. Measure or specify:</p>
+<ol>
+  <li><i>Q</i>, <i>V</i><sub>l</sub>, vessel geometry, and initial liquid xenon level;</li>
+  <li>saturator pressure, temperature, contact time, and preferably measured inlet xenon concentration;</li>
+  <li>organoid radius, number, exposed area, and placement in flow;</li>
+  <li>liquid xenon diffusivity, effective tissue diffusivity, and tissue/liquid partition ratio at experiment temperature;</li>
+  <li>whether liquid-side or membrane transfer resistance is significant; and</li>
+  <li>vessel concentration versus time, flow rate, and timing of saturator pressure changes.</li>
+</ol>
+<p>Do not automatically substitute a water Henry constant for the project's fitted <i>λ</i><sub>l</sub>, or assume a universal tissue partition factor. Values depend on temperature, medium, tissue, and the precise coefficient convention <a href="#ref-sander">[2]</a>, <a href="#ref-ercan">[5]</a>.</p>
+
+<h2>Notation</h2>
+<table><thead><tr><th>Symbol</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><i>C</i><sub>in</sub>, <i>C</i><sub>v</sub>, <i>C</i><sub>l</sub>, <i>C</i><sub>t</sub></td><td>Inlet, vessel, liquid-field, tissue xenon concentrations</td></tr>
+<tr><td><i>P</i><sub>s</sub></td><td>Xenon partial pressure in external saturator</td></tr>
+<tr><td><i>H</i><sub>cp</sub></td><td>Henry solubility coefficient, concentration per pressure</td></tr>
+<tr><td><i>λ</i><sub>t/l</sub></td><td>Tissue-to-liquid equilibrium concentration ratio</td></tr>
+<tr><td><i>Q</i>, <i>V</i><sub>l</sub></td><td>Liquid flow rate and vessel liquid volume</td></tr>
+<tr><td><i>D</i><sub>ax</sub>, <i>D</i><sub>t</sub></td><td>Effective axial dispersion and tissue diffusivity</td></tr>
+<tr><td><i>J</i></td><td>Xenon uptake flux from liquid into tissue</td></tr>
+<tr><td><i>R</i>, <i>L</i><sub>v</sub>, <i>u</i></td><td>Organoid radius, vessel length, and mean liquid velocity</td></tr>
+</tbody></table>
+
+<h2>Sources</h2>
+<div class="ref" id="ref-project">[0] G. L. Timmerman, <em>Xenon diffusion in fluid</em>, project manuscript supplied as <code>Xenon_diffusion.pdf</code>, April 2026.</div>
+<div class="ref" id="ref-iupac">[1] IUPAC, “Henry's law,” <em>Compendium of Chemical Terminology (Gold Book)</em>. <a href="https://goldbook.iupac.org/terms/view/R05135">Gold Book entry R05135</a>.</div>
+<div class="ref" id="ref-sander">[2] R. Sander, “Compilation of Henry's law constants (version 5.0.0) for water as solvent,” <em>Atmospheric Chemistry and Physics</em>, 23, 10901–12440, 2023. <a href="https://doi.org/10.5194/acp-23-10901-2023">doi:10.5194/acp-23-10901-2023</a>.</div>
+<div class="ref" id="ref-taylor">[3] G. I. Taylor, “Dispersion of soluble matter in solvent flowing slowly through a tube,” <em>Proceedings of the Royal Society of London A</em>, 219(1137), 186–203, 1953. <a href="https://doi.org/10.1098/rspa.1953.0139">doi:10.1098/rspa.1953.0139</a>.</div>
+<div class="ref" id="ref-crank">[4] J. Crank, <em>The Mathematics of Diffusion</em>, 2nd ed., Clarendon Press, Oxford, 1975.</div>
+<div class="ref" id="ref-ercan">[5] M. T. Ercan, “Solubility coefficients of <sup>133</sup>Xe in water, saline, dog blood and organs,” <em>International Journal of Applied Radiation and Isotopes</em>, 30, 757–759, 1979. <a href="https://doi.org/10.1016/0020-708X(79)90156-X">doi:10.1016/0020-708X(79)90156-X</a>.</div>
+</body>
+</html>

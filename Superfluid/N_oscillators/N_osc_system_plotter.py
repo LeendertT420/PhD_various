@@ -18,7 +18,7 @@ plt.rcParams.update({
     "mathtext.fontset": "cm",
 })
 
-gamma = 0.05
+gamma = 0.04
 colors = ['r', 'b', 'g', 'm']
 
 # ============================================================

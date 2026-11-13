@@ -474,6 +474,8 @@ def _system_numba_hidde_core(t : float,
     '''
     Core numerical backend compiled to raw machine code.
     '''
+    if use_4d:
+        use_3d = True
     # Unpack state
     x = state[0:N]
     y = state[N:2*N]
@@ -490,25 +492,27 @@ def _system_numba_hidde_core(t : float,
     # 2. Compute the interaction terms
     sigma_sq = sigma * sigma
     
-    X = profiles @ x
-    M = profiles.shape[0]
-    
+   
     # Vectorized element-wise operations
-    X2_W3 = (X**2) * W3
-    X3_W4 = (X**3) * W4
+    if use_3d:
+        X = profiles @ x
+        M = profiles.shape[0]
+        X2_W3 = (X**2) * W3
+    if use_4d:
+        X3_W4 = (X**3) * W4
 
     # 4. Accelerations dv/dt
     for i in range(N):
+        f3_i = 0.0
+        f4_i = 0.0
 
         # 3rd Order Van der Waals Force Projection
         if use_3d:
-            f3_i = 0.0
             for m in range(M):
                 f3_i += profiles[m, i] * X2_W3[m]
 
         # 4th Order Van der Waals Force Projection
         if use_4d:
-            f4_i = 0.0
             for m in range(M):
                 f4_i += profiles[m, i] * X3_W4[m]
 
@@ -1205,6 +1209,101 @@ def exact_numerical_lasing_threshold(params, delta_val, alpha_bracket=[0.001, 2.
         pass
         
     return np.nan
+
+
+
+
+
+def exact_numerical_lasing_thresholds(params, delta_val, alpha_bracket=[0.001, 2.0], num_grid_points=400):
+    """
+    Calculates all exact lasing thresholds across all modes by tracking 
+    individual eigenvalue branches in the upper half-plane (Im(lambda) >= 0) 
+    and detecting when their real parts cross zero.
+    """
+    p = params.copy()
+    p['delta'] = delta_val
+    N = p['N']
+    n_branches = N + 1  # For a (2N+1) real matrix, there are N+1 unique branches in Im(lambda) >= 0
+    
+    alphas = np.linspace(alpha_bracket[0], alpha_bracket[1], num_grid_points)
+    raw_upper_eigs_list = []
+    
+    # 1. Compute and filter eigenvalues in the upper half-plane for each alpha
+    for a in alphas:
+        p['alpha'] = a
+        fps = fixed_points_num(system, (p,), tolerance=1e-9)
+        
+        if not fps:
+            raw_upper_eigs_list.append(np.array([ -1.0 + 0j ] * n_branches))
+            continue
+        
+        fp = max(fps, key=lambda x: np.sum(x[:N]))
+        J = Jacobian(0.0, fp, p, use_3d=True, use_4d=True, use_optical_coupling=True)
+        eigs = np.linalg.eigvals(J)
+        
+        # Filter for the upper half-plane (with a small tolerance for numerical zero imaginary parts)
+        upper_eigs = eigs[np.imag(eigs) >= -1e-12]
+        raw_upper_eigs_list.append(upper_eigs)
+        
+    # 2. Track branches across grid steps for continuity
+    tracked = np.zeros((len(alphas), n_branches), dtype=complex)
+    first_eigs = raw_upper_eigs_list[0]
+    if len(first_eigs) >= n_branches:
+        tracked[0] = first_eigs[:n_branches]
+    else:
+        tracked[0] = np.pad(first_eigs, (0, n_branches - len(first_eigs)), constant_values=-1.0)
+        
+    for i in range(1, len(alphas)):
+        prev = tracked[i-1]
+        curr = raw_upper_eigs_list[i]
+        used = set()
+        matched = np.zeros(n_branches, dtype=complex)
+        for j, p_val in enumerate(prev):
+            if len(curr) == 0:
+                matched[j] = p_val
+                continue
+            dists = [np.abs(curr[k] - p_val) if k not in used else np.inf for k in range(len(curr))]
+            best_k = np.argmin(dists)
+            matched[j] = curr[best_k]
+            used.add(best_k)
+        tracked[i] = matched
+        
+    thresholds = []
+    
+    # 3. Check each upper-half-plane branch individually for real-part zero crossings
+    for branch_idx in range(n_branches):
+        real_parts = np.real(tracked[:, branch_idx])
+        
+        for i in range(len(alphas) - 1):
+            y1 = real_parts[i]
+            y2 = real_parts[i+1]
+            
+            if y1 * y2 < 0:
+                target_val = tracked[i, branch_idx]
+                
+                def branch_real_eig(alpha):
+                    p['alpha'] = alpha
+                    fps = fixed_points_num(system, (p,), tolerance=1e-9)
+                    if not fps:
+                        return -1.0
+                    fp = max(fps, key=lambda x: np.sum(x[:N]))
+                    J = Jacobian(0.0, fp, p, use_3d=True, use_4d=True, use_optical_coupling=True)
+                    eigs = np.linalg.eigvals(J)
+                    upper_eigs = eigs[np.imag(eigs) >= -1e-12]
+                    if len(upper_eigs) == 0:
+                        return -1.0
+                    closest_eig = upper_eigs[np.argmin(np.abs(upper_eigs - target_val))]
+                    return np.real(closest_eig)
+                    
+                try:
+                    sol = root_scalar(branch_real_eig, bracket=[alphas[i], alphas[i+1]], method='brentq')
+                    if sol.converged:
+                        if not any(np.isclose(sol.root, t, atol=1e-4) for t in thresholds):
+                            thresholds.append(sol.root)
+                except ValueError:
+                    pass
+                    
+    return sorted(thresholds)
 
 
 

@@ -8,6 +8,7 @@ from matplotlib.widgets import Slider, Button
 from scipy.signal import find_peaks, peak_prominences
 from scipy.signal import savgol_filter, hilbert
 from scipy.ndimage import uniform_filter1d
+from scipy.integrate import odeint
 from tqdm import tqdm
 
 import time
@@ -83,6 +84,34 @@ def get_mode_locking_order_parameter(xs_array):
     return R_ML_weighted
 
 
+
+def calculate_mode_locked_fraction(
+    ranges_list_threshold, classification, T_sim, T_eval
+):
+  """Calculates the total time fraction spent in mode-locked intervals."""
+  if classification != 'CHAOTIC':
+    print('modelocking but not chaotic!!!!')
+    return 0.0
+
+  if (
+      ranges_list_threshold is None
+      or len(ranges_list_threshold) == 0
+      or T_eval <= 0
+  ):
+    return 0.0
+
+  total_ml_time = 0.0
+
+  for t_start, t_stop in ranges_list_threshold:
+    if t_start is not None and t_stop is not None:
+      total_ml_time += t_stop - t_start
+    elif t_start is not None and t_stop is None:
+      total_ml_time += T_eval + T_sim - t_start
+
+  return min(1.0, total_ml_time / T_eval)
+
+
+
 def get_mode_locking_order_parameter2(xs_array):
     """
     Computes an AMPLITUDE-WEIGHTED Mode-Locking Order Parameter R_ML(t) in [0, 1].
@@ -121,7 +150,7 @@ def get_mode_locking_order_parameter2(xs_array):
 
 
 
-N = 15
+N = 4
 M = int(1e3)
 use_3d = True
 use_4d = True
@@ -133,12 +162,12 @@ config_SI = {
         'tau': 1 / 5000,
         'power': 0,
         'detuning': 0,
-        'd': to_SI({'sigma': 33})['d']
+        'd': to_SI({'sigma': 20})['d']
     }
 
 config = to_unitless(config_SI)
 
-delta = -2
+delta = -2.1#765
 alpha_bif = upper_boundary(N, delta)
 print(f'cusp: {cusp(N)}')
 print(f'bifurcation: {alpha_bif}')
@@ -154,12 +183,12 @@ config_final = {'N': N,
           'nu': config['nu']}
 
 final_config_SI = to_SI(config_final)
-print(final_config_SI)
 
-config_final['alpha'] = 0.145
-config_final['delta'] = -2 
 
-u0 = .3*np.random.random(2*N+1)
+config_final['alpha'] = alpha_bif+0.1
+config_final['delta'] = delta
+print(f'config_final before solving: {config_final}')
+u0 =np.zeros(2*N+1)
 
 
 
@@ -179,19 +208,14 @@ saddle_remnant = np.mean(lower_fixed_points, axis=0)
 main_fixed_point = fixed_points[0]
 
 
-
-
-
-
-
-Dt_sim = 1200
-t_span = (0.0, Dt_sim)
+T_equi = 0
+T_eval = 10000
 dt = 1/(20*np.sqrt(mu_spectrum(N)[-1]))
-time_resolution = int(1000 * np.sqrt(mu_spectrum(N)[-1])/(2*np.pi))
+time_resolution = int(20 * np.sqrt(mu_spectrum(N)[-1])/(2*np.pi))
 
-N_points = Dt_sim * time_resolution
+N_points = T_eval * time_resolution
 
-t_eval = np.linspace(t_span[0], t_span[1], N_points)
+t_eval = np.linspace(T_equi, T_equi + T_eval, N_points)
 offset = np.full_like(t_eval, np.sum(fixed_points[0][:N]))
 
 delta_sweep = False
@@ -203,18 +227,25 @@ if delta_sweep:
     deltas[deltas < delta_stop] = delta_stop
 
 
+print(config_final)
 
 
+
+
+start = time.time()
 sol = solve_ivp(
     fun=system_numba_hidde,
-    t_span=t_span,
+    t_span=(0, T_equi + T_eval),
     y0=u0,
     args=(config_final, profiles, W3, W4, use_3d, use_4d),# delta_sweep, delta_start, delta_stop, sweepspeed),
-    method='DOP853',
+    method='RK45',
     t_eval=t_eval,
-    rtol=1e-6,
-    atol=1e-8
+    rtol=1e-5,
+    atol=1e-7
 )
+stop = time.time()
+
+print(stop-start, 'seconds')
 
 v_dot = np.array([system_numba_hidde(t, y, config_final, profiles, W3, W4, use_3d, use_4d) 
                 for t, y in zip(sol.t, sol.y.T)])
@@ -230,7 +261,12 @@ y = sol.y[N:2*N, :]
 film_height = np.sum(x, axis=0)
 dt = t_eval[1] - t_eval[0]
 
-distance_to_fixed_point = np.sqrt(np.mean((sol.y - saddle_remnant.reshape(-1, 1))**2, axis=0))
+saddle_remnant = np.zeros(2*N+1)
+x_bar = -2*delta/3 + np.sqrt(delta**2-3)/3
+saddle_remnant[:N] = x_bar
+saddle_remnant[-1]
+
+distance_to_fixed_point = np.sqrt(np.sum((sol.y - saddle_remnant.reshape(-1, 1))**2, axis=0))
 
 
 Omegas = np.sqrt(config_final['mu'])
@@ -283,30 +319,40 @@ t_eval_padded = np.pad(t_eval.astype(object), (0, 1), constant_values=None)
 # Pair start and stop values
 ranges = list(zip(t_eval_padded[starts], t_eval_padded[stops]))
 
+print(ranges)
 
-fig, axs = plt.subplots(6, 1, figsize=(12, 12), sharex=True)
+fig, axs = plt.subplots(7, 1, figsize=(12, 12))
 
 # --- Left Panel: Time Series & Peaks ---
 axs[0].plot(t_eval, film_height, c="k", zorder=100, label="Film height", alpha=1)
 ax0_right = axs[0].twinx()
-for i in range(N):
-    ax0_right.plot(t_eval, sol.y[i, :], c="k", zorder=100, alpha=0.3)
 axs[0].set_ylabel('Film Displacement')
+axs[0].hlines(np.sum(fixed_points[0][:N]), t_eval[0], t_eval[-1], color='r', linestyle='--', label=r'$X^*$')
+axs[0].legend()
 
-axs[1].plot(t_eval, speed)
-axs[1].set_ylabel('Speed (local vector field strength)')
+for i in range(N):
+    axs[1].plot(t_eval, sol.y[i, :], c="k", zorder=100, alpha=0.3)
+axs[1].set_ylabel('Mode Displacement')
 
-axs[2].plot(t_eval, sol.y[-1,:])
-axs[2].set_ylabel('Optical Field')
+axs[2].plot(t_eval, speed)
+axs[2].set_ylabel('Speed')
 
-axs[3].plot(t_eval, distance_to_fixed_point, c='orange', zorder=100)
+axs[3].plot(t_eval, sol.y[-1,:])
+axs[3].hlines(fixed_points[0][-1], t_eval[0], t_eval[-1], color='r', linestyle='--', label=r'$z^*$')
+axs[3].set_ylabel('Optical Field')
+axs[3].legend()
+
+#axs[3].plot(t_eval, distance_to_fixed_point, c='orange', zorder=100)
 
 axs[4].plot(t_eval, R_ML, c="g", zorder=101, alpha=.5)
 axs[4].plot(t_eval, R_ML_running_avg, c="g", zorder=101)
-for range in ranges:
-    axs[4].vlines(range[0], 0, 1)
-    axs[4].vlines(range[1], 0, 1)
+axs[4].set_ylabel(r'$R_{ML}$')
 axs[4].set_xlabel("Time")
+
+
+axs[5].set_xlim(T_equi, T_equi+T_eval)
+axs[5].plot(t_eval, distance_to_fixed_point)
+axs[5].set_ylabel('Distance to saddle remnant')
 
 fft_freqs = np.fft.rfftfreq(N_points, d=dt)
 fft_vals = (2.0 / N_points) * np.abs(np.fft.rfft(film_height-np.mean(film_height)))
@@ -314,8 +360,91 @@ fft_vals = (2.0 / N_points) * np.abs(np.fft.rfft(film_height-np.mean(film_height
 spectrum = np.sqrt(config_final['mu'])/2/np.pi
 f_max = spectrum[-1]+np.mean(np.diff(spectrum))
 
-axs[5].vlines(spectrum, np.min(fft_vals), np.max(fft_vals), color='k', linestyle='--', alpha=.7, label='unperturbed spectrum')
-axs[5].plot(fft_freqs, fft_vals)
+axs[6].vlines(spectrum, np.min(fft_vals), np.max(fft_vals), color='k', linestyle='--', alpha=.7, label='unperturbed spectrum')
+axs[6].vlines(np.arange(1, N+3, 1)*fft_freqs[np.argmax(fft_vals)], np.min(fft_vals), np.max(fft_vals), color='r', linestyle='--', alpha=.7, label='frequency multiples')
+axs[6].plot(fft_freqs, fft_vals)
+axs[6].set_xlim(0, spectrum[-1]+2*np.mean(np.diff(spectrum)))
+axs[6].legend()
+axs[6].set_xlabel('Frequency')
+axs[6].set_ylabel('FFT')
+
+for i in np.arange(1,6):
+    axs[i].sharex(axs[0])
+
+plt.tight_layout()
+plt.show()
+
+
+plt.scatter(distance_to_fixed_point, speed, alpha=0.025)
+plt.xlabel('distance to saddle remnant')
+plt.ylabel('Speed (local vector field strength)')
+plt.show()
+
+plt_3D_modes = True
+
+if plt_3D_modes:
+    pass
+    # ==============================================================================
+# 3D Phase Space Plot: (x_i, y_i, z) per Mode with All Numerical Fixed Points
+# ==============================================================================
+
+# Extract all numerically calculated fixed points
+num_fp = len(fixed_points)
+
+# Grid setup for N subplots (5 columns for N=15)
+ncols = 5
+nrows = int(np.ceil(N / ncols))
+
+fig_3d = plt.figure(figsize=(16, 3.2 * nrows))
+fig_3d.suptitle("3D Phase Space Trajectories $(x_i, y_i, z)$ & Numerical Fixed Points", fontsize=14, y=0.98)
+
+z_vals = sol.y[-1, :]  # Shared optical field coordinate z
+
+# Color palette & markers for distinct fixed points
+fp_colors = ['crimson', 'darkorange', 'purple', 'green', 'cyan']
+fp_markers = ['X', 'D', '^', 's', 'p']
+
+for i in range(N):
+    ax3d = fig_3d.add_subplot(nrows, ncols, i + 1, projection='3d')
+    
+    x_mode = sol.y[i, :]
+    y_mode = sol.y[N + i, :]
+    
+    # Trajectory plot
+    ax3d.plot(x_mode, y_mode, z_vals, color='tab:blue', alpha=0.5, lw=0.8)
+    
+    # Plot every numerical fixed point found by fixed_points_num
+    for fp_idx, fp in enumerate(fixed_points):
+        x_fp = fp[i]
+        y_fp = fp[N + i]
+        z_fp = fp[-1]
+        
+        color = fp_colors[fp_idx % len(fp_colors)]
+        marker = fp_markers[fp_idx % len(fp_markers)]
+        
+        # Label each fixed point (only for the first subplot to prevent legend duplication)
+        label = f'FP {fp_idx + 1}' if i == 0 else None
+        
+        ax3d.scatter(
+            x_fp, y_fp, z_fp, 
+            color=color, 
+            marker=marker, 
+            s=65, 
+            zorder=10, 
+            edgecolor='black', 
+            linewidth=0.5,
+            label=label
+        )
+    
+    # Subplot details
+    ax3d.set_xlabel(f'$x_{{{i+1}}}$', labelpad=-2)
+    ax3d.set_ylabel(f'$y_{{{i+1}}}$', labelpad=-2)
+    ax3d.set_zlabel('$z$', labelpad=-2)
+    ax3d.set_title(f'Mode {i+1}', fontsize=10, pad=0)
+    ax3d.tick_params(axis='both', which='major', labelsize=8)
+
+# Add single legend for fixed points at the figure level
+fig_3d.legend(loc='upper right', bbox_to_anchor=(0.98, 0.96), framealpha=0.9)
 
 plt.tight_layout()
 plt.show()
@@ -465,7 +594,7 @@ if run_peak_finder:
     plt.show()
 
 
-animate = True
+animate = False
 
 if animate:
         # =====================================================================
@@ -566,20 +695,22 @@ if animate:
         plt.show()
 
 Lyapunov = True
-tspan = (0.0, 2000)
-epsilon = 1e-10
+tspan = (0.0, 1000)
+epsilon = 1e-5
 init1 = sol.y[:,-1]
 init2 = init1 + epsilon*np.ones(2*N+1)
 
 if Lyapunov:
-    teval = np.linspace(tspan[0], tspan[1], int(10*tspan[1]*np.sqrt(config_final['mu'])[-1]/(2*np.pi)))
+    teval = np.linspace(tspan[0], tspan[1], int((tspan[1]-tspan[0])*time_resolution))
 
     sol1 = solve_ivp(
             fun=system_numba_hidde,
             t_span=tspan,
             y0=init1,  
             args=(config_final, profiles, W3, W4, use_3d, use_4d),
-            method='RK45',            
+            method='RK45',
+            rtol=1e-10,
+            atol=1e-12,
             t_eval=teval)
 
     sol2 = solve_ivp(
@@ -587,7 +718,9 @@ if Lyapunov:
             t_span=tspan,
             y0=init2, 
             args=(config_final, profiles, W3, W4, use_3d, use_4d),
-            method='RK45',           
+            method='RK45',
+            rtol=1e-10,
+            atol=1e-12,
             t_eval=teval)
     
     print('simulations are the same:', np.allclose(sol1.y, sol2.y))
@@ -601,7 +734,7 @@ if Lyapunov:
     log_distance = np.log(distance)
     time = sol1.t
 
-    saturation_idx = np.where(distance >= 1)[0]
+    saturation_idx = np.where(distance >= 0.05)[0]
     print(saturation_idx)
     if len(saturation_idx)==0:
         saturation_idx = -1

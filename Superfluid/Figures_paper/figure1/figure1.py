@@ -79,7 +79,9 @@ config_final = {
     'delta': delta,
     'sigma': 30,
     'xi': np.ones(N),
-    'nu': config['nu']
+    'nu': config['nu'],
+    'chi_ijk': np.load('./chi_ijk.npy'),
+    'chi_ijkl': np.load('./chi_ijkl.npy')
 }
 
 deltas = np.linspace(-5, 2, 300)
@@ -144,12 +146,17 @@ alphas_lower_clean = np.array(alphas_lower_clean)
 deltas_upper_clean = np.array(deltas_upper_clean)
 alphas_upper_clean = np.array(alphas_upper_clean)
 
-threshold = lasing_threshold(
+thresholds = lasing_threshold(
     config_final,
     deltas,
-    return_all=False
+    return_all=True
 )
 
+thresholds_exact = np.zeros((N, len(deltas)))
+
+print('Computing exact lasing thresholds...')
+for i, d in tqdm(enumerate(deltas)):
+    thresholds_exact[:,i] = exact_numerical_lasing_thresholds(config_final, d)
 
 # ============================================================
 # Function for PANEL (b)
@@ -280,15 +287,35 @@ ax1.plot(
 )
 
 # Lasing threshold
-ax1.plot(
-    deltas,
-    threshold,
-    color='r',
-    linestyle='--',
-    linewidth=0.7,
-    label='Lasing Threshold',
-    zorder=4
-)
+for i, threshold in enumerate(thresholds):
+    if i==0:
+        label = 'Lasing Threshold'
+    else:
+        label = None
+    ax1.plot(
+        deltas,
+        threshold,
+        color='r',
+        linestyle='--',
+        linewidth=0.7,
+        label=label,
+        zorder=4
+    )
+
+for i, threshold in enumerate(thresholds_exact):
+    if i==0:
+        label = 'Exact Lasing Threshold'
+    else:
+        label = None
+    ax1.plot(
+        deltas,
+        threshold,
+        color='g',
+        linestyle='--',
+        linewidth=0.7,
+        label=label,
+        zorder=4
+    )
 
 
 

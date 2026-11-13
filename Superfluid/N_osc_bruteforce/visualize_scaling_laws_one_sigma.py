@@ -65,6 +65,9 @@ def analyze_intermittency_sweep(
         alphas = data["alphas_axis"]
         deltas = data["deltas_axis"]
 
+        print(np.min(alphas), np.max(alphas), len(alphas), np.min(deltas), np.max(deltas), len(deltas))
+        print(data['T_eval'], data['T_sim'])
+
         classifications = data["classifications"]
         ranges_list = data["ranges_list"]
 

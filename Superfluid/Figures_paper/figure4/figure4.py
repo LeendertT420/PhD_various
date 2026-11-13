@@ -34,27 +34,28 @@ plt.rcParams.update({
 
 def calculate_mode_locked_fraction(
     ranges_list_threshold, classification, T_sim, T_eval
-):
-  """Calculates the total time fraction spent in mode-locked intervals."""
-  if classification != 'CHAOTIC':
-    return 0.0
+    ):
+    """Calculates the total time fraction spent in mode-locked intervals."""
+    if classification != 'CHAOTIC':
+        print('modelocking but not chaotic!!!!')
+        return 0.0
 
-  if (
-      ranges_list_threshold is None
-      or len(ranges_list_threshold) == 0
-      or T_eval <= 0
-  ):
-    return 0.0
+    if (
+        ranges_list_threshold is None
+        or len(ranges_list_threshold) == 0
+        or T_eval <= 0
+    ):
+        return 0.0
 
-  total_ml_time = 0.0
+    total_ml_time = 0.0
 
-  for t_start, t_stop in ranges_list_threshold:
-    if t_start is not None and t_stop is not None:
-      total_ml_time += t_stop - t_start
-    elif t_start is not None and t_stop is None:
-      total_ml_time += T_eval + T_sim - t_start
+    for t_start, t_stop in ranges_list_threshold:
+        if t_start is not None and t_stop is not None:
+            total_ml_time += t_stop - t_start
+        elif t_start is not None and t_stop is None:
+            total_ml_time += T_eval + T_sim - t_start
 
-  return min(1.0, total_ml_time / T_eval)
+    return min(1.0, total_ml_time / T_eval)
 
 
 def load_and_process_layer(
@@ -74,8 +75,8 @@ def load_and_process_layer(
         print(f"Category '{c}': {count} occurrences")
     if mode_locking_metrics:
         ranges_list = data['ranges_list']
-    T_sim = float(data['T_sim'])
-    T_eval = float(data['T_eval'])
+    T_sim = 1500.
+    T_eval = 8000#float(data['T_eval'])
     print(T_sim, T_eval)
     print(np.min(alphas), np.max(alphas), np.min(deltas), np.max(deltas))
     shape = (len(alphas), len(deltas))
@@ -118,7 +119,7 @@ def load_and_process_layer(
 # ============================================================
 
 N = 15
-sigmas = [30, 40, 50]
+sigmas = [30, 40, 70]
 threshold_idx = 3  # Index corresponding to threshold = 80%
 
 chi_ijk = np.load('tensors/chi_ijk.npy')
@@ -183,20 +184,23 @@ for idx, sigma in enumerate(sigmas):
   ax_left.plot(
       d_left, lower_boundary(N, d_left), color='k', linestyle='-', lw=0.8
   )
-
+  
   exact_thresholds = []
     
-  print("Calculating exact numerical thresholds (this will take a moment)...")
-  print(config)
-  for d in d_left:
-    config['delta'] = d
-    alpha_c = exact_numerical_lasing_threshold(config, d)
-    exact_thresholds.append(alpha_c)
-  print(exact_thresholds)
+  #print("Calculating exact numerical thresholds (this will take a moment)...")
+  #print(config)
+  #for d in d_left:
+  #  config['delta'] = d
+  #  alpha_c = exact_numerical_lasing_threshold(config, d)
+  #  exact_thresholds.append(alpha_c)
+  #print(exact_thresholds)
 
-  ax_left.plot(
-      d_left, exact_thresholds, color='k', linestyle='--', lw=0.8
-  )
+  #ax_left.plot(
+  #    d_left, np.array(exact_thresholds)+0.2, color='k', linestyle='--', lw=0.8
+  #)
+  #ax_left.plot(
+  #    d_left, np.array(exact_thresholds)-0.1, color='k', linestyle='--', lw=0.8
+  #)
   ax_left.set_xlim(np.min(d_left), np.max(d_left))
   ax_left.set_ylim(np.min(a_left), np.max(a_left))
 
